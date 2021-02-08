@@ -1,0 +1,6 @@
+*.pyc
+*.so
+*.o
+*~
+.python-version
+*.data
