@@ -28,7 +28,7 @@ def get_byte_state_from_range_header(header_string):
 
 
 def convert_dt_to_google_string(dt):
-    return dt.isoformat(dt).split('+')[0] + 'Z'
+    return dt.isoformat().split('+')[0] + 'Z'
 
 
 class GoogleDrive(object):
@@ -189,7 +189,6 @@ class GoogleDrive(object):
             response_dict = r.json()
 
             for new_folder in response_dict['files']:
-                result_folder = None
 
                 # First check if the parent exists in the tree. If not, we'll
                 # need to create it at the root level and update later.
@@ -268,10 +267,16 @@ class GoogleDrive(object):
 
             # For each file, add to tree
             for rx_file in response_dict['files']:
-                tree.add_file(rx_file['id'],
-                              rx_file['name'],
-                              parent_id=rx_file['parents'][0],
-                              modified_datetime=date_parser.isoparse(rx_file['modifiedTime']))
+                # Remeber that our tree is now possibly cut down and only starts at some
+                # folder that isn't the drive root, so look for the parent first, and add
+                # only if found.
+                parent = tree.find_item_by_id(rx_file['parents'][0])
+
+                if parent is not None:
+                    tree.add_file(rx_file['id'],
+                                  rx_file['name'],
+                                  parent_id=parent['id'],
+                                  modified_datetime=date_parser.isoparse(rx_file['modifiedTime']))
 
             yield tree
 
@@ -293,6 +298,40 @@ class GoogleDrive(object):
 
         r.raise_for_status()
         return r.json()['id']
+
+    def create_folder_by_path(self, folder_path):
+        """
+        Creates a folder as specfified by parent_path.
+        Folders in the path are checked for existence and created if they aren't
+        already.
+
+        :param folder_path: path to new folder from the server root.
+        :return: the id of the created folder.
+        """
+        root_folder_tree = self.get_root_folder_tree()
+        current_parent_id = root_folder_tree.find_item_by_path('', is_path_to_file=False)['id']
+
+        path_folders = StoreTree.get_path_levels(folder_path)
+
+        if path_folders[0] == '':
+            return current_parent_id
+
+        print(root_folder_tree._tree)
+        current_path = ''
+        for folder_name in path_folders:
+            new_parent = root_folder_tree.find_item_by_path(
+                StoreTree.concat_paths([current_path, folder_name]))
+            if new_parent is None:
+                # Need to make on the server
+                new_parent_id = self.create_folder(current_parent_id, folder_name)
+                root_folder_tree.add_folder(new_parent_id, name=folder_name, parent_id=current_parent_id)
+                current_parent_id = new_parent_id
+            else:
+                current_parent_id = new_parent['id']
+
+            current_path = StoreTree.concat_paths([current_path, folder_name])
+
+        return current_parent_id
 
 
     def _wait_to_resume_upload(self, session_url, total_file_len, num_retries=5):
@@ -486,7 +525,6 @@ class GoogleDrive(object):
         file_meta = self._get_file_metadata(file_id)
         if output_filename is None:
             output_filename = file_meta['name']
-        modified_datetime = date_parser.isoparse(file_meta['modifiedTime'])
 
         # Download the data
         # Special requests mode for streaming large files
@@ -500,6 +538,8 @@ class GoogleDrive(object):
                 headers={'Authorization': self._get_auth_header()},
                              params={'alt': 'media'}) as r:
             r.raise_for_status()
+
+            os.makedirs(output_dir_path, exist_ok=True)
 
             with open(os.path.join(output_dir_path, output_filename), 'wb') as f:
                 for chunk in r.iter_content(chunk_size=128):

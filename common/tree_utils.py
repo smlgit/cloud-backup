@@ -36,6 +36,7 @@ class StoreTree(object):
         :param p: the path string to standarise.
         """
         if p == '/': return ''
+        if p == '.': return ''
 
         return p.replace('\\', '/').strip('/')
 
@@ -48,7 +49,6 @@ class StoreTree(object):
         :param p:
         :return: list of strings.
         """
-        if p == '.': return ''
 
         return StoreTree.standardise_path(p).split('/')
 
@@ -272,3 +272,35 @@ class StoreTree(object):
                 stack.append((new_folder, current_path))
 
         return result
+
+    def get_items(self):
+        """
+        :return: a generator - each result is a {'id': , 'name': , 'parent_path': , is_folder: ,}
+        dict. The 'modified' key/value pair is included for files.
+        Paths are the parent folder path and are relative to the tree root.
+        Any directory returned is guaranteed to be returned before any of its children.
+        """
+
+        # Depth first search to build file paths
+        stack = [(self._tree, '')]
+
+        while len(stack) > 0:
+            current_folder_tup = stack.pop()
+            current_folder = current_folder_tup[0]
+            old_path = current_folder_tup[1]
+
+            current_path = StoreTree.concat_paths([old_path, current_folder['name']])
+
+            for item_def in current_folder['files'] + current_folder['folders']:
+                res = {
+                    'id': item_def['id'],
+                    'name': item_def['name'],
+                    'parent_path': current_path,
+                    'is_folder': StoreTree.item_is_folder(item_def)}
+
+                if StoreTree.item_is_folder(item_def):
+                    stack.append((item_def, current_path))
+                else:
+                    res['modified'] = item_def['modified']
+
+                yield res
