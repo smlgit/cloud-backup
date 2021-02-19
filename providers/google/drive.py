@@ -31,35 +31,34 @@ def convert_dt_to_google_string(dt):
     return dt.isoformat().split('+')[0] + 'Z'
 
 
-class GoogleDrive(object):
+def convert_google_string_to_utc_datetime(s):
+    return date_parser.isoparse(s)
 
+
+class GoogleDrive(object):
     def __init__(self, account_id, config_dir_path, config_pw):
         self._config = {'account_name': account_id}
         self._config_dir_path = config_dir_path
         self._config_pw = config_pw
-        self._api_drive_endpoint_prefix = http_server_utils.join_url_components([GoogleServerData.apis_domain, 'drive/v3'])
+        self._api_drive_endpoint_prefix = http_server_utils.join_url_components(
+            [GoogleServerData.apis_domain, 'drive/v3'])
         self._api_upload_endpoint_prefix = http_server_utils.join_url_components([GoogleServerData.apis_domain,
-                                                                     'upload/drive/v3'])
+                                                                                  'upload/drive/v3'])
         self._load_config(account_id)
+
+        # Trigger a token refresh on start.
+        # TODO: change the expire time to a datetime so this happens automatically.
         self._access_token_start_time = datetime.datetime(1970, 1, 1)
-
-        # Try to refresh our token on start
-        if 'auth' in self._config and 'refresh_token' in self._config['auth']:
-            self.refresh_token()
-
 
     def _get_config_file_name(self):
         return self._config['account_name'] + '-cbconfig.data'
 
-
     def _get_config_file_full_path(self):
         return os.path.join(self._config_dir_path, self._get_config_file_name())
-
 
     def _save_config(self):
         with open(self._get_config_file_full_path(), 'w') as f:
             json.dump(self._config, f)
-
 
     def _load_config(self, account_name):
         if account_name == 'local_test_acc':
@@ -82,40 +81,60 @@ class GoogleDrive(object):
                                'user will need to authenticate before accessing the drive.')
                 self._config = {'account_name': account_name}
 
-
     def _get_auth_header(self):
+        """"""
         return 'Bearer ' + self._config['auth']['access_token']
-
 
     def _refresh_token_required(self):
         # refresh if we only have 5 minutes left
         return (self._access_token_start_time +
-            datetime.timedelta(seconds=int(self._config['auth']['expires_in'])) <
-            datetime.datetime.now())
+                datetime.timedelta(seconds=int(self._config['auth']['expires_in'])) <
+                datetime.datetime.now())
 
-
-    def _do_request(self, method, url, headers={}, params={}, data={}, json=None):
+    def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
+                    error_500_retries=0):
         """
         Does a standard requests.get call with the passed params but also:
             1. Checks to see if a token refresh is required
             2. Sets the authorization header
 
         :param method: one of 'get', 'post', 'put', 'delete'
-
+        :param error_500_retries: set to the number of retries when encountering
+        Google's pesky 500 Server Error: Internal Server Error error.
         :return: whatever is returned from a requests call
         """
-        if method == 'get': func = requests.get
-        elif method == 'post': func = requests.post
-        elif method == 'put': func = requests.put
-        elif method == 'patch': func = requests.patch
-        elif method == 'delete': func = requests.delete
+
+        if method == 'get':
+            func = requests.get
+        elif method == 'post':
+            func = requests.post
+        elif method == 'put':
+            func = requests.put
+        elif method == 'patch':
+            func = requests.patch
+        elif method == 'delete':
+            func = requests.delete
 
         if self._refresh_token_required():
             self.refresh_token()
 
-        headers['Authorization'] = self._get_auth_header()
-        return func(url, headers=headers, params=params, data=data, json=json)
+        retries = 0
 
+        r = None
+        current_sleep_time = 1
+
+        while retries <= error_500_retries:
+            headers['Authorization'] = self._get_auth_header()
+            r = func(url, headers=headers, params=params, data=data, json=json)
+            if r.status_code != 500:
+                break
+
+            logger.warning('Received an HTTP 500 error from the Google server...')
+            time.sleep(current_sleep_time)
+            retries += 1
+            current_sleep_time *= 2
+
+        return r
 
     def run_token_acquisition(self):
         self._config['auth'] = auth.get_access_tokens('https://www.googleapis.com/auth/drive',
@@ -123,7 +142,6 @@ class GoogleDrive(object):
                                                       GoogleServerData.client_secret)
         self._save_config()
         self._access_token_start_time = datetime.datetime.now()
-
 
     def refresh_token(self):
         logger.info('Refresing google access token...')
@@ -135,12 +153,10 @@ class GoogleDrive(object):
         self._access_token_start_time = datetime.datetime.now()
         self._save_config()
 
-
     def revoke_token(self):
         auth.revoke_token(self._config['auth']['access_token'])
         self._config['auth'] = {}
         self._save_config()
-
 
     def _get_root_folder(self):
         """
@@ -148,19 +164,19 @@ class GoogleDrive(object):
         """
         r = self._do_request('get',
                              http_server_utils.join_url_components(
-                                 [self._api_drive_endpoint_prefix, 'files', 'root']))
+                                 [self._api_drive_endpoint_prefix, 'files', 'root']),
+                             error_500_retries=5)
         r.raise_for_status()
         return r.json()
-
 
     def _get_file_metadata(self, file_id):
         r = self._do_request('get',
                              http_server_utils.join_url_components(
                                  [self._api_drive_endpoint_prefix, 'files', file_id]),
-                             params={'fields': 'name, parents, modifiedTime'})
+                             params={'fields': 'name, parents, modifiedTime'},
+                             error_500_retries=5)
         r.raise_for_status()
         return r.json()
-
 
     def _get_drive_folder_tree(self):
         """
@@ -182,8 +198,9 @@ class GoogleDrive(object):
                 params['pageToken'] = response_dict['nextPageToken']
 
             r = self._do_request('get', http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
-                                                                'files']),
-                                     params=params)
+                                                                               'files']),
+                                 params=params,
+                                 error_500_retries=5)
             r.raise_for_status()
 
             response_dict = r.json()
@@ -210,7 +227,6 @@ class GoogleDrive(object):
 
         return result
 
-
     def get_root_folder_tree(self, root_folder_path=''):
         """
 
@@ -232,7 +248,6 @@ class GoogleDrive(object):
 
         return complete.create_new_from_id(new_root['id'])
 
-
     def get_root_file_tree(self, root_folder_path=''):
         """
         This is a generator function. Each iteration returned will be an instance
@@ -246,7 +261,6 @@ class GoogleDrive(object):
         # First get the folder tree
         tree = self.get_root_folder_tree(root_folder_path)
 
-
         # Get the files
 
         response_dict = None
@@ -255,13 +269,14 @@ class GoogleDrive(object):
             params = {
                 'q': 'mimeType != \'application/vnd.google-apps.folder\' and trashed = false',
                 'fields': 'files/id, files/name, files/parents, files/modifiedTime',
-                      'pageSize': 1000}
+                'pageSize': 1000}
             if isinstance(response_dict, dict) and 'nextPageToken' in response_dict:
                 params['pageToken'] = response_dict['nextPageToken']
 
             r = self._do_request('get', http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
-                                                                'files']),
-                                     params=params)
+                                                                               'files']),
+                                 params=params,
+                                 error_500_retries=5)
             r.raise_for_status()
             response_dict = r.json()
 
@@ -276,10 +291,9 @@ class GoogleDrive(object):
                     tree.add_file(rx_file['id'],
                                   rx_file['name'],
                                   parent_id=parent['id'],
-                                  modified_datetime=date_parser.isoparse(rx_file['modifiedTime']))
+                                  modified_datetime=convert_google_string_to_utc_datetime(rx_file['modifiedTime']))
 
             yield tree
-
 
     def create_folder(self, parent_id, name):
         """
@@ -290,11 +304,12 @@ class GoogleDrive(object):
 
         r = self._do_request('post', http_server_utils.join_url_components(
             [self._api_drive_endpoint_prefix, 'files']),
-            json={
-                'name': name,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [parent_id]
-            })
+                             json={
+                                 'name': name,
+                                 'mimeType': 'application/vnd.google-apps.folder',
+                                 'parents': [parent_id]
+                             },
+            error_500_retries=5)
 
         r.raise_for_status()
         return r.json()['id']
@@ -316,7 +331,6 @@ class GoogleDrive(object):
         if path_folders[0] == '':
             return current_parent_id
 
-        print(root_folder_tree._tree)
         current_path = ''
         for folder_name in path_folders:
             new_parent = root_folder_tree.find_item_by_path(
@@ -332,7 +346,6 @@ class GoogleDrive(object):
             current_path = StoreTree.concat_paths([current_path, folder_name])
 
         return current_parent_id
-
 
     def _wait_to_resume_upload(self, session_url, total_file_len, num_retries=5):
         """
@@ -367,7 +380,6 @@ class GoogleDrive(object):
 
         return 'timeout'
 
-
     def _upload_file_data(self, session_url, file_path, previous_retry_secs=0.5):
         """
         Does a file upload after a session url has been acquired.
@@ -400,11 +412,16 @@ class GoogleDrive(object):
                     if num_to_send == 0:
                         num_to_send = left_to_send % send_in_multiples_of
 
-                r = self._do_request('put', session_url,
-                                     headers={'Content-Range': 'bytes {}-{}/{}'.format(
-                                         current_pos, current_pos + num_to_send - 1, total_length
-                                     )},
-                                     data=f.read(num_to_send))
+                # If uploading a zero length file, we just send a put request with no range or data.
+                if total_length == 0:
+                    header = {}
+                    data = {}
+                else:
+                    header = {'Content-Range': 'bytes {}-{}/{}'.format(
+                        current_pos, current_pos + num_to_send - 1, total_length)}
+                    data = f.read(num_to_send)
+
+                r = self._do_request('put', session_url, headers=header, data=data)
 
                 if r.status_code == 403:
                     # Must restart
@@ -424,7 +441,7 @@ class GoogleDrive(object):
                             ))
                         else:
                             # Should be a file id
-                            return wa
+                            return wait_result
                 elif r.status_code != 200 and r.status_code != 201 and r.status_code != 308:
                     r.raise_for_status()
                 else:
@@ -445,6 +462,28 @@ class GoogleDrive(object):
 
                 f.seek(current_pos)
 
+    def create_empty_file(self, parent_id, name, modified_datetime):
+        """
+
+        :param parent_id: The id of the new file's parent folder.
+        :param name: The name to give the file on the remote server.
+        :param modified_datetime: Modified time.
+        :return: The id of the newly created file.
+        """
+
+        r = self._do_request('post',
+                             http_server_utils.join_url_components(
+                                 [self._api_drive_endpoint_prefix, 'files']),
+                             params={'fields': 'id'},
+                             json={
+                                 'name': name,
+                                 'modifiedTime': convert_dt_to_google_string(modified_datetime),
+                                 'parents': [parent_id]
+                             },
+                             error_500_retries=5)
+
+        r.raise_for_status()
+        return r.json()['id']
 
     def create_file(self, parent_id, name, modified_datetime, file_local_path):
         """
@@ -456,18 +495,22 @@ class GoogleDrive(object):
         :return: The id of the newly created file.
         """
 
+        if os.stat(file_local_path).st_size == 0:
+            return self.create_empty_file(parent_id, name, modified_datetime)
+
         retries = 0
         retry_sleep = 0.5
 
         while retries < 10:
             r = self._do_request('post', http_server_utils.join_url_components(
                 [self._api_upload_endpoint_prefix, 'files']),
-                params={'uploadType': 'resumable', 'fields': 'id'},
-                json={
-                    'name': name,
-                    'modifiedTime': convert_dt_to_google_string(modified_datetime),
-                    'parents': [parent_id]
-                })
+                                 params={'uploadType': 'resumable', 'fields': 'id'},
+                                 json={
+                                     'name': name,
+                                     'modifiedTime': convert_dt_to_google_string(modified_datetime),
+                                     'parents': [parent_id]
+                                 },
+                             error_500_retries=5)
 
             r.raise_for_status()
 
@@ -519,7 +562,6 @@ class GoogleDrive(object):
 
         raise ConnectionError('Too many retries for file upload')
 
-
     def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
         # Get the modified time and name
         file_meta = self._get_file_metadata(file_id)
@@ -536,7 +578,7 @@ class GoogleDrive(object):
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'files', file_id]),
                 headers={'Authorization': self._get_auth_header()},
-                             params={'alt': 'media'}) as r:
+                params={'alt': 'media'}) as r:
             r.raise_for_status()
 
             os.makedirs(output_dir_path, exist_ok=True)
@@ -545,11 +587,46 @@ class GoogleDrive(object):
                 for chunk in r.iter_content(chunk_size=128):
                     f.write(chunk)
 
+            # Set modified time
+            os.utime(os.path.join(output_dir_path, output_filename),
+                     times=(datetime.datetime.utcnow().timestamp(),
+                            convert_google_string_to_utc_datetime(file_meta['modifiedTime']).timestamp()))
 
     def delete_item_by_id(self, item_id):
         r = self._do_request('delete', http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
-                                                               'files', item_id]))
+                                                                              'files', item_id]),
+                             error_500_retries=5)
         r.raise_for_status()
+
+        # Unfortunately, Google Drive appears to take some time after a delete
+        # before everything actually is gone, especially when deleting a folder
+        # (i.e. its children seem to stick around for a while).
+        # So we query the drive after the delete and check that the item is gone
+        # and there are no children either. This is pretty easy because if there is
+        # a child, there will be an instance of the parent without a name.
+        # A bit messy, but better than tests failing intermittently.
+        retries = 0
+        max_retries = 20
+
+        while retries < max_retries:
+            done = True
+
+            for item in self.get_root_folder_tree().get_items():
+                if (item['id'] == item_id or
+                        (StoreTree.item_is_folder(item) and 'name' not in item)):
+                    done = False
+                    break
+
+            if done is True:
+                break
+            else:
+                logger.info('Waiting for Google Drive to actually delete the files...')
+                time.sleep(2)
+
+            retries += 1
+
+        if done is False or retries >= max_retries:
+            raise SystemError('Delete on Google Drive doesn\'t appear to have worked.')
 
 
 if __name__ == '__main__':
@@ -568,9 +645,3 @@ if __name__ == '__main__':
     # print(d.create_file('1wLI1Xk2Rnswsahd7GK-qSg3m1ztBMDvD', 'testfile.txt',
     #               datetime.datetime.utcnow(),
     #               os.path.join(os.getcwd(), 'cbackup_test/local_root', 'file256k_plus1.txt')))
-
-    print(d.update_file('1rygRkPFaARjb2UJLz1JKWLUFVEFwWVCM', datetime.datetime.utcnow(),
-                  os.path.join(os.getcwd(), 'cbackup_test/local_root', 'file256k.txt')))
-
-
-

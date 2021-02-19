@@ -83,22 +83,9 @@ class StoreTree(object):
         elements.
         """
 
-        stack = [self._tree]
-
-        while len(stack) > 0:
-            folder = stack.pop()
-            if folder['id'] == element_id:
-                return folder
-            else:
-                # check files
-                if 'files' in folder:
-                    for file in folder['files']:
-                        if file['id'] == element_id:
-                            return file
-
-                # Still not found, put this folders folders on the stack
-                for child in folder['folders']:
-                    stack.append(child)
+        for item in self.get_items():
+            if item['id'] == element_id:
+                return item
 
         return None
 
@@ -245,6 +232,46 @@ class StoreTree(object):
         else:
             new_parent['files'].append(child)
 
+    def get_folders(self):
+        """
+        A generator that produces a DFS representation of the folders in
+        the tree.
+
+        Note that client callers shoudn't modify the result and should
+        only access the {'folders': [{id: , 'name'}] , 'files': [{'id' , 'name': }]}
+        elements.
+
+        :return: Generator. Each item is a ('folders' , 'files': , 'name': , 'id': } dict.
+        """
+
+        stack = [self._tree]
+
+        while len(stack) > 0:
+            current_folder = stack.pop()
+
+            for folder in current_folder['folders']:
+                stack.append(folder)
+
+            yield current_folder
+
+    def get_items(self):
+        """
+        A generator that produces a DFS representation of the folders and files in
+        the tree.
+
+        Note that client callers shoudn't modify the result and should
+        only access the {'folders': [{id: , 'name'}] , 'files': [{'id' , 'name': }]}
+        elements.
+
+        :return: Generator. Each item is a ('folders' , 'files': , 'name': , 'id': } dict
+        ('folders' only for files}.
+        """
+        for folder in self.get_folders():
+            yield folder
+
+            for f in folder['files']:
+                yield f
+
     def get_file_paths_list(self, include_folders=False):
         """
         :return: a list of the paths of all files in the tree.
@@ -273,7 +300,7 @@ class StoreTree(object):
 
         return result
 
-    def get_items(self):
+    def get_items_with_parent_path(self):
         """
         :return: a generator - each result is a {'id': , 'name': , 'parent_path': , is_folder: ,}
         dict. The 'modified' key/value pair is included for files.

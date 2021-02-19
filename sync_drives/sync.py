@@ -1,5 +1,6 @@
 import os
 import logging
+import itertools
 from pathlib import Path
 import datetime
 from providers.google.drive import GoogleDrive
@@ -14,6 +15,22 @@ _drive_implementations = {
 }
 
 
+def _files_dt_out_of_sync(local_mtime, server_mtime):
+    """
+
+    :param local_mtime: local time modified datetime.
+    :param server_mtime: server time modified datetime.
+    :return:
+    """
+
+    # Greater than one millisecond constitutes out of sync.
+    # Can't use exact equal because some providers can only
+    # store to ms resolution.
+    if (local_mtime - server_mtime) / datetime.timedelta(milliseconds=1) > 1:
+        return True
+
+    return False
+
 def download_store(server_root_path, provider_name, local_dest_path,
                     server_user_id, path_to_config_dir, config_pw):
     cloud_drive = _drive_implementations[provider_name](
@@ -24,7 +41,7 @@ def download_store(server_root_path, provider_name, local_dest_path,
         server_tree = res
 
     # Step through items and download to local
-    for item in server_tree.get_items():
+    for item in server_tree.get_items_with_parent_path():
         item_dir_path = os.path.join(local_dest_path, item['parent_path'])
 
         if item['is_folder'] is True:
@@ -33,11 +50,6 @@ def download_store(server_root_path, provider_name, local_dest_path,
             # Download the file from the server
             cloud_drive.download_file_by_id(item['id'], item_dir_path,
                                             output_filename=item['name'])
-
-            # Set modified time
-            os.utime(os.path.join(item_dir_path, item['name']),
-                     times=(datetime.datetime.utcnow().timestamp(),
-                            item['modified'].timestamp()))
 
         logger.info('Downloaded file {} to {}'.format(
             item['name'], item_dir_path
@@ -88,7 +100,10 @@ def sync_drives(path_to_local_root, path_to_config_dir,
         # NOTE: This assumes pathlib.Path.glob('**') returns parent directories before their children.
         local_root = Path(path_to_local_root)
 
-        for item in local_root.glob('**/*'):
+        # This chaining will produce all items in the local root (recursive) AND the local root itself.
+        # It is important we have the local root too for checking deleted items on
+        # the local.
+        for item in itertools.chain([local_root], local_root.glob('**/*')):
             relative_path = item.relative_to(local_root)
 
             if str(relative_path) != '.':
@@ -98,7 +113,8 @@ def sync_drives(path_to_local_root, path_to_config_dir,
                 server_item =\
                     server_tree.find_item_by_path(str(relative_path), is_path_to_file=item.is_file())
 
-                local_modified_time = datetime.datetime.utcfromtimestamp(item.stat().st_mtime)
+                local_modified_time = datetime.datetime.fromtimestamp(
+                    item.stat().st_mtime, tz=datetime.timezone.utc)
 
                 if server_item is None:
                     # Not on server, add it
@@ -106,9 +122,11 @@ def sync_drives(path_to_local_root, path_to_config_dir,
                         str(parent_relative_path), is_path_to_file=False)['id']
 
                     if item.is_dir() is True:
+                        logger.info('Creating folder {}'.format(str(item)))
                         new_id = cloud_drive.create_folder(parent_id, item.name)
                         server_tree.add_folder(new_id, name=item.name, parent_id=parent_id)
                     elif item.is_file() is True:
+                        logger.info('Creating file {}'.format(str(item)))
                         new_id = cloud_drive.create_file(parent_id, item.name, local_modified_time,
                                                          str(item))
                         server_tree.add_file(new_id, item.name, parent_id=parent_id,
@@ -117,7 +135,10 @@ def sync_drives(path_to_local_root, path_to_config_dir,
                     # Is on the server. If a file, check date for update
                     server_item = server_tree.find_item_by_path(str(relative_path), is_path_to_file=True)
 
-                    if local_modified_time > server_item['modified']:
+                    if _files_dt_out_of_sync(local_modified_time, server_item['modified']):
+                        logger.info('Uploading file {} with id {}'.format(
+                            str(item), server_item['id']
+                        ))
                         cloud_drive.update_file(server_item['id'], local_modified_time,
                                                 str(item))
 
@@ -143,6 +164,9 @@ def sync_drives(path_to_local_root, path_to_config_dir,
 
                         if exists_on_local is False:
                             # Can it on the server
+                            logger.info('Deleting item {} with id {} from server'.format(
+                                server_child['name'], server_child['id']
+                            ))
                             cloud_drive.delete_item_by_id(server_child['id'])
                             server_tree.remove_item(server_child['id'])
 
