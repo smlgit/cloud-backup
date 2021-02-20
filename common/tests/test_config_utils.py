@@ -43,3 +43,11 @@ class TestConfigUtils(unittest.TestCase):
         config_utils.change_config_password(config_file, old_pw, new_pw)
 
         self.assertEqual(config_object, config_utils.get_config(config_file, new_pw))
+
+    def testWrongPassword(self):
+        config_file = os.path.join(self.test_dir, 'config_file.conf')
+        config_utils.save_config({'sfs': 'sfaffe', 'dt': datetime.datetime.now()},
+                                 config_file, 'correct_pw')
+
+        with self.assertRaises(ValueError):
+            config_utils.get_config(config_file, 'wrong_password')

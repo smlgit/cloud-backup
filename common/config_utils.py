@@ -59,7 +59,13 @@ def get_config(config_file_path, password):
         token = f.read()
 
     fern = _get_fernet(salt, password)
-    return pickle.loads(fern.decrypt(token))
+
+    try:
+        result = pickle.loads(fern.decrypt(token))
+    except:
+        raise ValueError('Failed to extract config from file, password may be wrong...')
+
+    return result
 
 
 def change_config_password(config_file_path, old_password, new_password):
