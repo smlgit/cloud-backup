@@ -76,8 +76,6 @@ class HiderClass(object):
                 tree_utils.StoreTree.concat_paths([self.server_test_folder_parent_path,
                                                    self.server_test_folder_name])
 
-            self.drive = self.drive_class(self.account_id, self.config_file_dir, '')
-
         def _setup_test_store(self, files_definition_list):
             # Clear directories locally
             shutil.rmtree(self.test_local_dir, ignore_errors=True)
@@ -95,25 +93,26 @@ class HiderClass(object):
                     file_def['size'], leave_existing=False)
 
             # Clear server store
-            server_tree = self.drive.get_root_folder_tree('')
+            drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
+            server_tree = drive.get_root_folder_tree('')
             server_test_sandbox = server_tree.find_item_by_path(
                 self.server_test_folder_parent_path,
                 is_path_to_file=False)
 
             if server_test_sandbox is not None:
-                self.drive.delete_item_by_id(server_test_sandbox['id'])
+                drive.delete_item_by_id(server_test_sandbox['id'])
 
             # Create sandbox folder on server
-            sandbox_id = self.drive.create_folder_by_path(self.server_test_folder_parent_path)
+            sandbox_id = drive.create_folder_by_path(self.server_test_folder_parent_path)
 
             # Create test root folder on server
-            self.drive.create_folder(sandbox_id, self.server_test_folder_name)
+            drive.create_folder(sandbox_id, self.server_test_folder_name)
 
             # Add a file to the test sandbox - this makes sure we are testing with
             # files on the drive that aren't related to the store itself.
             test_utils.make_random_file(os.path.join(
                 self.test_root_dir, 'dummy_test_file.png'), 10)
-            self.drive.create_file(sandbox_id, 'Dummy_file.png', datetime.datetime.utcnow(),
+            drive.create_file(sandbox_id, 'Dummy_file.png', datetime.datetime.utcnow(),
                                      os.path.join(self.test_root_dir, 'dummy_test_file.png'))
 
         def _download_store(self):
@@ -121,7 +120,8 @@ class HiderClass(object):
             for res in sync.download_store(self.server_test_folder_path,
                                            self.provider_name,
                                            self.test_download_dir,
-                                           self.account_id, self.config_file_dir, ''):
+                                           self.account_id, self.config_file_dir,
+                                           self.config_pw):
                 pass
 
         def _sync_drives(self):
@@ -130,7 +130,7 @@ class HiderClass(object):
                                         [{'provider_name': self.provider_name,
                                           'user_id': self.account_id,
                                           'server_root_path': self.server_test_folder_path}],
-                                        ''):
+                                        self.config_pw):
                 pass
 
         def testSyncBasicFileModify(self):
@@ -179,6 +179,7 @@ class TestSyncingGoogleDrive(HiderClass.TestSyncing):
     def setUp(self):
         GoogleServerData.set_to_google_server()
         self.account_id = 'smlgit100'
+        self.config_pw = 'smlgit100_test_password'
         self.provider_name = 'google'
         self.drive_class = GoogleDrive
         super(TestSyncingGoogleDrive, self).setUp()

@@ -9,6 +9,7 @@ from dateutil import parser as date_parser
 
 import providers.google.auth as auth
 from common import http_server_utils
+import common.config_utils as config_utils
 from common.tree_utils import StoreTree
 from providers.google.server_metadata import GoogleServerData
 
@@ -46,10 +47,6 @@ class GoogleDrive(object):
                                                                                   'upload/drive/v3'])
         self._load_config(account_id)
 
-        # Trigger a token refresh on start.
-        # TODO: change the expire time to a datetime so this happens automatically.
-        self._access_token_start_time = datetime.datetime(1970, 1, 1)
-
     def _get_config_file_name(self):
         return self._config['account_name'] + '-cbconfig.data'
 
@@ -57,8 +54,9 @@ class GoogleDrive(object):
         return os.path.join(self._config_dir_path, self._get_config_file_name())
 
     def _save_config(self):
-        with open(self._get_config_file_full_path(), 'w') as f:
-            json.dump(self._config, f)
+        config_utils.save_config(self._config,
+                                 self._get_config_file_full_path(),
+                                 self._config_pw)
 
     def _load_config(self, account_name):
         if account_name == 'local_test_acc':
@@ -68,15 +66,20 @@ class GoogleDrive(object):
                 "auth": {
                     "access_token": "local_test_access_token",
                     "refresh_token": "local_test_refresh_token",
-                    "expires_in": 10000,
+                    "expires_at": datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=10),
                     "scope": "https://www.googleapis.com/auth/drive",
                     "token_type": "Bearer"}
             }
         else:
             try:
-                with open(self._get_config_file_full_path(), 'r') as f:
-                    self._config = json.load(f)
+                self._config = config_utils.get_config(
+                    self._get_config_file_full_path(), self._config_pw
+                )
+            except ValueError as err:
+                # Probably password error, re-raise
+                raise err
             except:
+                logger.error('Failed to retrieve config data - ')
                 logger.warning('Failed to open google drive config file for account {}, '
                                'user will need to authenticate before accessing the drive.')
                 self._config = {'account_name': account_name}
@@ -87,9 +90,8 @@ class GoogleDrive(object):
 
     def _refresh_token_required(self):
         # refresh if we only have 5 minutes left
-        return (self._access_token_start_time +
-                datetime.timedelta(seconds=int(self._config['auth']['expires_in'])) <
-                datetime.datetime.now())
+        return (self._config['auth']['expires_at'] <
+                datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(minutes=5))
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
                     error_500_retries=0):
@@ -140,17 +142,25 @@ class GoogleDrive(object):
         self._config['auth'] = auth.get_access_tokens('https://www.googleapis.com/auth/drive',
                                                       GoogleServerData.client_id,
                                                       GoogleServerData.client_secret)
+        self._config['auth']['expires_at'] = \
+            datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(
+                seconds=int(self._config['auth']['expires_in']))
+
         self._save_config()
-        self._access_token_start_time = datetime.datetime.now()
 
     def refresh_token(self):
         logger.info('Refresing google access token...')
 
-        self._config['auth'].update(
-            auth.refresh_token(GoogleServerData.client_id,
-                               GoogleServerData.client_secret,
-                               self._config['auth']['refresh_token']))
-        self._access_token_start_time = datetime.datetime.now()
+        res_dict = auth.refresh_token(
+            GoogleServerData.client_id,
+            GoogleServerData.client_secret,
+            self._config['auth']['refresh_token'])
+
+        self._config['auth'].update(res_dict)
+        self._config['auth']['expires_at'] =\
+            datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(
+                seconds=int(res_dict['expires_in']))
+
         self._save_config()
 
     def revoke_token(self):
@@ -633,7 +643,17 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     GoogleServerData.set_to_google_server()
-    d = GoogleDrive('smlgit100', os.getcwd(), '')
+    d = GoogleDrive('smlgit100', os.getcwd(), 'smlgit100_test_password')
+
+    # config_utils.save_config({"account_name": "smlgit100",
+    #                           "auth": {
+    #                               "access_token": "ya29.A0AfH6SMAmgtOK_CqKSP87wgehrbyIuWarQVMiSRDNE5-EjtX4T-A2LUSlXd_h9nOW_RE2WA9kR5XxJmfS2C_9JZKFSlgpF9jdl1iJSpQWylr-nhHShVpYaIQjexXIceZg5Wb-XISv4tbUUFB1N-Gxw9llAMmjig",
+    #                               "expires_at": datetime.datetime(1971, 1, 1, tzinfo=datetime.timezone.utc),
+    #                               "refresh_token": "1//0gwaKj1AUIs5uCgYIARAAGBASNwF-L9IrqUK-gcUOrMVfWBlgrWPZ3A8gt-NdIKmC8TU8N2JN2rm2hd6ryDdcdbPS1st8h5JK1Rg",
+    #                               "scope": "https://www.googleapis.com/auth/drive",
+    #                               "token_type": "Bearer"}},
+    #                          d._get_config_file_full_path(),
+    #                          'smlgit100_test_password')
 
     # d.download_file_by_id('1Kd51Ig3UGwq6dtFvKjlgxfXb3i3ZrzwL',
     #                       os.path.join(os.getcwd()))
