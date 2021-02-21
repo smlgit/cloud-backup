@@ -18,10 +18,10 @@ def _files_dt_out_of_sync(local_mtime, server_mtime):
     :return:
     """
 
-    # Greater than one millisecond constitutes out of sync.
+    # Greater than one second constitutes out of sync.
     # Can't use exact equal because some providers can only
     # store to ms resolution.
-    if (local_mtime - server_mtime) / datetime.timedelta(milliseconds=1) > 1:
+    if (local_mtime - server_mtime) / datetime.timedelta(milliseconds=1) > 1000:
         return True
 
     return False

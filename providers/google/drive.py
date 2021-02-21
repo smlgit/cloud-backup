@@ -12,6 +12,7 @@ import common.config_utils as config_utils
 from common.tree_utils import StoreTree
 from providers.google.server_metadata import GoogleServerData
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -288,7 +289,7 @@ class GoogleDrive(object):
 
             params = {
                 'q': 'mimeType != \'application/vnd.google-apps.folder\' and trashed = false',
-                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime',
+                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime, files/shared',
                 'pageSize': 1000}
             if isinstance(response_dict, dict) and 'nextPageToken' in response_dict:
                 params['pageToken'] = response_dict['nextPageToken']
@@ -297,14 +298,20 @@ class GoogleDrive(object):
                                                                                'files']),
                                  params=params,
                                  error_500_retries=5)
+
             r.raise_for_status()
             response_dict = r.json()
 
             # For each file, add to tree
             for rx_file in response_dict['files']:
-                # Need to check for this because shared files can have no parents
-                if 'parents' in rx_file:
-                    # Remeber that our tree is now possibly cut down and only starts at some
+
+                # Need to check for this because shared files/folders can have no parents. This
+                # will cause a dangling item in our tree root and theoretically we could delete
+                # it on sync with our local root.
+                # We only support the use of non-shared items at present.
+                if 'shared' in rx_file and rx_file['shared'] is False:
+
+                    # Remember that our tree is now possibly cut down and only starts at some
                     # folder that isn't the drive root, so look for the parent first, and add
                     # only if found.
                     parent = tree.find_item_by_id(rx_file['parents'][0])
