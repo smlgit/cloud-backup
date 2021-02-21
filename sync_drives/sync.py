@@ -31,6 +31,17 @@ def _files_dt_out_of_sync(local_mtime, server_mtime):
 
     return False
 
+
+def get_supported_provider_names():
+    return [key for key in _drive_implementations.keys()]
+
+
+def required_config_is_present(provider_name, config_dir_path, account_name):
+    return _drive_implementations[provider_name].required_config_is_present(
+        config_dir_path, account_name
+    )
+
+
 def download_store(server_root_path, provider_name, local_dest_path,
                     server_user_id, path_to_config_dir, config_pw):
     cloud_drive = _drive_implementations[provider_name](

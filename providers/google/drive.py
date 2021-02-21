@@ -35,6 +35,14 @@ def convert_google_string_to_utc_datetime(s):
     return date_parser.isoparse(s)
 
 
+def _get_config_file_name(account_name):
+    return account_name + '-google-cbconfig.data'
+
+
+def _get_config_file_full_path(config_dir_path, account_name):
+    return os.path.join(config_dir_path, _get_config_file_name(account_name))
+
+
 class GoogleDrive(object):
     def __init__(self, account_id, config_dir_path, config_pw):
         self._config = {'account_name': account_id}
@@ -46,15 +54,10 @@ class GoogleDrive(object):
                                                                                   'upload/drive/v3'])
         self._load_config(account_id)
 
-    def _get_config_file_name(self):
-        return self._config['account_name'] + '-google-cbconfig.data'
-
-    def _get_config_file_full_path(self):
-        return os.path.join(self._config_dir_path, self._get_config_file_name())
-
     def _save_config(self):
         config_utils.save_config(self._config,
-                                 self._get_config_file_full_path(),
+                                 _get_config_file_full_path(self._config_dir_path,
+                                                            self._config['account_name']),
                                  self._config_pw)
 
     def _load_config(self, account_name):
@@ -72,7 +75,9 @@ class GoogleDrive(object):
         else:
             try:
                 self._config = config_utils.get_config(
-                    self._get_config_file_full_path(), self._config_pw
+                    _get_config_file_full_path(self._config_dir_path,
+                                               self._config['account_name']),
+                    self._config_pw
                 )
             except ValueError as err:
                 # Probably password error, re-raise
@@ -138,6 +143,10 @@ class GoogleDrive(object):
             current_sleep_time *= 2
 
         return r
+
+    @staticmethod
+    def required_config_is_present(config_dir_path, account_name):
+        return os.path.exists(_get_config_file_full_path(config_dir_path, account_name))
 
     def run_token_acquisition(self):
         self._config['auth'] = auth.get_access_tokens('https://www.googleapis.com/auth/drive',
