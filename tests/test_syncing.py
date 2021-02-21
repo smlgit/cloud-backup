@@ -77,6 +77,13 @@ class HiderClass(object):
                                                    self.server_test_folder_name])
 
         def _setup_test_store(self, files_definition_list):
+            """
+
+            :param files_definition_list: list of {'name': , 'path': ,'size': ,} dicts.
+            If size is negative, will make a directory.
+
+            :return:
+            """
             # Clear directories locally
             shutil.rmtree(self.test_local_dir, ignore_errors=True)
             shutil.rmtree(self.test_download_dir, ignore_errors=True)
@@ -88,9 +95,13 @@ class HiderClass(object):
             # Add files in specification
             for file_def in files_definition_list:
                 os.makedirs(os.path.join(self.test_local_dir, file_def['path']), exist_ok=True)
-                test_utils.make_random_file(os.path.join(
-                    self.test_local_dir, file_def['path'], file_def['name']),
-                    file_def['size'], leave_existing=False)
+
+                if file_def['size'] < 0:
+                    os.makedirs(os.path.join(self.test_local_dir, file_def['path'], file_def['name']))
+                else:
+                    test_utils.make_random_file(os.path.join(
+                        self.test_local_dir, file_def['path'], file_def['name']),
+                        file_def['size'], leave_existing=False)
 
             # Clear server store
             drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
@@ -133,12 +144,18 @@ class HiderClass(object):
                                         self.config_pw):
                 pass
 
+        @unittest.SkipTest
         def testSyncBasicFileModify(self):
             file_defs = [
-                {'name': 'file_0_byte.txt', 'path': '', 'size': 0},
+                {'name': 'file_0_byte.txt', 'path': '','size': 0},
                 {'name': 'file_1_byte.txt', 'path': '', 'size': 1},
                 {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1},
-                {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024}
+                {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024},
+
+                # Empty directories
+                {'name': 'empty_dir1', 'path': '', 'size': -1},
+                {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
+                {'name': 'empty_dir3', 'path': 'folder1', 'size': -1},
             ]
 
             # All new files
@@ -150,29 +167,63 @@ class HiderClass(object):
 
             # Modify a single file (data only) and redo (do for each file in list)
             for mod_file_def in file_defs:
-                test_utils.make_random_file(os.path.join(
-                    self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
-                    mod_file_def['size'], leave_existing=False)
+                if mod_file_def['size'] >= 0:
+                    test_utils.make_random_file(os.path.join(
+                        self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
+                        mod_file_def['size'], leave_existing=False)
 
-                self._sync_drives()
-                self._download_store()
-                self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+                    self._sync_drives()
+                    self._download_store()
+                    self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
             # Modify a single file (change size) and redo (do for each file in list)
             for mod_file_def in file_defs:
-                test_utils.make_random_file(os.path.join(
-                    self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
-                    mod_file_def['size'] + 3, leave_existing=False)
+                if mod_file_def['size'] >= 0:
+                    test_utils.make_random_file(os.path.join(
+                        self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
+                        mod_file_def['size'] + 3, leave_existing=False)
 
-                self._sync_drives()
-                self._download_store()
-                self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+                    self._sync_drives()
+                    self._download_store()
+                    self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
             # Remove all the files
             _remove_dir_contents(self.test_local_dir)
             self._sync_drives()
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+
+        def testDeleteItem(self):
+
+            file_defs = [
+                {'name': 'file_0_byte.txt', 'path': '', 'size': 0},
+                {'name': 'file_1k_byte.txt', 'path': 'folder1', 'size': 1024},
+
+                # Empty directories
+                {'name': 'empty_dir1', 'path': '', 'size': -1},
+                {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
+            ]
+
+            # For each item, load the store with the all the items and delete the
+            # item and verify
+
+            for file_def in file_defs:
+
+                # All new files
+                self._setup_test_store(file_defs)
+
+                self._sync_drives()
+
+                item_path = os.path.join(self.test_local_dir, file_def['path'], file_def['name'])
+
+                if file_def['size'] < 0:
+                    shutil.rmtree(item_path, ignore_errors=True)
+                else:
+                    os.remove(item_path)
+
+                self._sync_drives()
+                self._download_store()
+                self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
 class TestSyncingGoogleDrive(HiderClass.TestSyncing):
 

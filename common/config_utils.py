@@ -13,7 +13,7 @@ using a password to generate the key.
 """
 
 def _get_salt_file_path(config_file_path):
-    return config_file_path + '.salty-xxcffv.txt'
+    return config_file_path + '.salty-xxcffv.data'
 
 
 def _get_fernet(salt, password):

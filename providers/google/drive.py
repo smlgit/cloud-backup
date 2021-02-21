@@ -1,5 +1,4 @@
 import datetime
-import json
 import logging
 import os
 import time
@@ -48,7 +47,7 @@ class GoogleDrive(object):
         self._load_config(account_id)
 
     def _get_config_file_name(self):
-        return self._config['account_name'] + '-cbconfig.data'
+        return self._config['account_name'] + '-google-cbconfig.data'
 
     def _get_config_file_full_path(self):
         return os.path.join(self._config_dir_path, self._get_config_file_name())
@@ -81,7 +80,9 @@ class GoogleDrive(object):
             except:
                 logger.error('Failed to retrieve config data - ')
                 logger.warning('Failed to open google drive config file for account {}, '
-                               'user will need to authenticate before accessing the drive.')
+                               'user will need to authenticate before accessing the drive.'.format(
+                    account_name
+                ))
                 self._config = {'account_name': account_name}
 
     def _get_auth_header(self):
@@ -367,6 +368,8 @@ class GoogleDrive(object):
         wait_time = 1.0
         retries = 0
 
+        logger.warning('Received an HTTP 5XX error from the Google server...')
+
         while retries < num_retries:
             time.sleep(wait_time)
             r = self._do_request('put', session_url,
@@ -436,7 +439,7 @@ class GoogleDrive(object):
                 if r.status_code == 403:
                     # Must restart
                     return previous_retry_secs * 2
-                elif r.status_code in [502, 503, 504]:
+                elif r.status_code >= 500 and r.status_code < 600:
                     # Some sort of network interuption. Try and resume
                     wait_result = self._wait_to_resume_upload(session_url, total_length)
 

@@ -45,7 +45,7 @@ def download_store(server_root_path, provider_name, local_dest_path,
         item_dir_path = os.path.join(local_dest_path, item['parent_path'])
 
         if item['is_folder'] is True:
-            os.makedirs(item_dir_path, exist_ok=True)
+            os.makedirs(os.path.join(item_dir_path, item['name']), exist_ok=True)
         else:
             # Download the file from the server
             cloud_drive.download_file_by_id(item['id'], item_dir_path,
