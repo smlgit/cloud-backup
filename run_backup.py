@@ -3,16 +3,16 @@ import os
 import logging
 import getpass
 import sync_drives.sync as sync
+import providers.provider_list as provider_list
 from common.basic_utils import check_for_user_quit
-from providers.google.server_metadata import GoogleServerData
 
 
 def main(args):
 
     logging.basicConfig(level=logging.INFO)
 
-    # Set server addresses
-    GoogleServerData.set_to_google_server()
+    # Init provider metadata
+    provider_list.init_providers()
 
     # Check that any initial authentication has been done:
     if sync.required_config_is_present(args.provider, args.cpath, args.user) is False:
@@ -21,15 +21,17 @@ def main(args):
         return
 
     print('Please enter your config file encryption password.')
+    print('Note: this only refers to the password used to encrypt your local config files.')
     config_pw = getpass.getpass()
 
     print("Preparing to sync - press \'q\' then enter to stop the sync.")
 
     for res in sync.sync_drives(args.local_store_path, args.cpath,
-                                [{'provider_name': args.provider,
+                                {'provider_name': args.provider,
                                   'user_id': args.user,
-                                  'server_root_path': args.remote_store_path}],
-                                config_pw):
+                                  'server_root_path': args.remote_store_path},
+                                config_pw,
+                                analyse_only=args.analyse_only):
 
         if check_for_user_quit() is True:
             break
@@ -42,7 +44,7 @@ if __name__ == '__main__':
                                      'of the remote store and uploads/deletes files/directories '
                                      'as required.')
 
-    parser.add_argument('provider', type=str, choices=sync.get_supported_provider_names(),
+    parser.add_argument('provider', type=str, choices=provider_list.get_supported_provider_names(),
                         help='The name of the cloud drive provider.')
     parser.add_argument('user', type=str,
                         help='The account name that identifies you to the drive provider.')
@@ -53,5 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--cpath', type=str, default=os.getcwd(),
                         help='The full path to the directory that stores cloud-backup authentication'
                              'config files.')
+    parser.add_argument('-a', action='store_true', dest='analyse_only',
+                        help='If specified, only sync analysis is done, the actual sync isn\'t carried out.')
 
     main(parser.parse_args())

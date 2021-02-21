@@ -288,7 +288,7 @@ class GoogleDrive(object):
 
             params = {
                 'q': 'mimeType != \'application/vnd.google-apps.folder\' and trashed = false',
-                'fields': 'files/id, files/name, files/parents, files/modifiedTime',
+                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime',
                 'pageSize': 1000}
             if isinstance(response_dict, dict) and 'nextPageToken' in response_dict:
                 params['pageToken'] = response_dict['nextPageToken']
@@ -302,16 +302,18 @@ class GoogleDrive(object):
 
             # For each file, add to tree
             for rx_file in response_dict['files']:
-                # Remeber that our tree is now possibly cut down and only starts at some
-                # folder that isn't the drive root, so look for the parent first, and add
-                # only if found.
-                parent = tree.find_item_by_id(rx_file['parents'][0])
+                # Need to check for this because shared files can have no parents
+                if 'parents' in rx_file:
+                    # Remeber that our tree is now possibly cut down and only starts at some
+                    # folder that isn't the drive root, so look for the parent first, and add
+                    # only if found.
+                    parent = tree.find_item_by_id(rx_file['parents'][0])
 
-                if parent is not None:
-                    tree.add_file(rx_file['id'],
-                                  rx_file['name'],
-                                  parent_id=parent['id'],
-                                  modified_datetime=convert_google_string_to_utc_datetime(rx_file['modifiedTime']))
+                    if parent is not None:
+                        tree.add_file(rx_file['id'],
+                                      rx_file['name'],
+                                      parent_id=parent['id'],
+                                      modified_datetime=convert_google_string_to_utc_datetime(rx_file['modifiedTime']))
 
             yield tree
 

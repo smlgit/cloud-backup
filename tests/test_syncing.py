@@ -138,9 +138,9 @@ class HiderClass(object):
         def _sync_drives(self):
             for res in sync.sync_drives(self.test_local_dir,
                                         self.config_file_dir,
-                                        [{'provider_name': self.provider_name,
+                                        {'provider_name': self.provider_name,
                                           'user_id': self.account_id,
-                                          'server_root_path': self.server_test_folder_path}],
+                                          'server_root_path': self.server_test_folder_path},
                                         self.config_pw):
                 pass
 

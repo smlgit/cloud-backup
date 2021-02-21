@@ -185,3 +185,47 @@ class TestStoreTree(unittest.TestCase):
         self.assertIn(StoreTree.concat_paths(['', 'folder4', 'file2']), file_paths)
         self.assertIn(StoreTree.concat_paths(['', 'file3.png']), file_paths)
 
+    def testCreateFromId(self):
+        tree = StoreTree(0)
+
+        # - folder1 - folder4 - file2
+        #           - file4
+        # - folder2
+        # - folder3 - folder5
+        # - file1.txt
+        # - file3.png
+
+        tree.add_folder(1, 'folder1')
+        tree.add_folder(2, 'folder2')
+        tree.add_folder(3, 'folder3')
+        tree.add_folder(4, 'folder4', parent_id=1)
+        tree.add_folder(5, 'folder5', parent_id=3)
+
+        tree.add_file(6, 'file1.txt')
+        tree.add_file(7, 'file2', parent_id=4)
+        tree.add_file(8, 'file3.png')
+        tree.add_file(9, 'file4', parent_id=1)
+
+        new_tree = tree.create_new_from_id(1)
+
+        # folder 1 is now the new root
+
+        # - folder4 - file2
+        # - file4
+
+        root_dict = tree.find_item_by_id(1)
+        self.assertEqual(len(root_dict['files']), 1)
+        self.assertEqual(len(root_dict['folders']), 1)
+        self.assertEqual(root_dict['id'], 1)
+        self.assertEqual(root_dict['name'], 'folder1')
+
+        file4_dict = root_dict['files'][0]
+        self.assertEqual(file4_dict['id'], 9)
+        self.assertEqual(file4_dict['name'], 'file4')
+
+        folder4_dict = tree.find_item_by_id(4)
+        self.assertEqual(len(folder4_dict['files']), 1)
+        self.assertEqual(len(folder4_dict['folders']), 0)
+        self.assertEqual(folder4_dict['id'], 4)
+        self.assertEqual(folder4_dict['name'], 'folder4')
+
