@@ -19,7 +19,7 @@ def main(args):
             'Config file for this provider and user already exists - this will '
             'redo authorization.')
 
-    drive = drive_class(args.user, args.cpath, config_pw)
+    drive = drive_class(args.user, args.cpath, '')
     drive.run_token_acquisition()
 
 

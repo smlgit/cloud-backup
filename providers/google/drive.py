@@ -80,6 +80,8 @@ class GoogleDrive(object):
                                                self._config['account_name']),
                     self._config_pw
                 )
+
+                print(self._config['auth']['refresh_token'])
             except ValueError as err:
                 # Probably password error, re-raise
                 raise err
@@ -652,30 +654,3 @@ class GoogleDrive(object):
                              error_500_retries=5)
         r.raise_for_status()
 
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-
-    GoogleServerData.set_to_google_server()
-    d = GoogleDrive('smlgit100', os.getcwd(), 'smlgit100_test_password')
-
-    # config_utils.save_config({"account_name": "smlgit100",
-    #                           "auth": {
-    #                               "access_token": "ya29.A0AfH6SMAmgtOK_CqKSP87wgehrbyIuWarQVMiSRDNE5-EjtX4T-A2LUSlXd_h9nOW_RE2WA9kR5XxJmfS2C_9JZKFSlgpF9jdl1iJSpQWylr-nhHShVpYaIQjexXIceZg5Wb-XISv4tbUUFB1N-Gxw9llAMmjig",
-    #                               "expires_at": datetime.datetime(1971, 1, 1, tzinfo=datetime.timezone.utc),
-    #                               "refresh_token": "1//0gwaKj1AUIs5uCgYIARAAGBASNwF-L9IrqUK-gcUOrMVfWBlgrWPZ3A8gt-NdIKmC8TU8N2JN2rm2hd6ryDdcdbPS1st8h5JK1Rg",
-    #                               "scope": "https://www.googleapis.com/auth/drive",
-    #                               "token_type": "Bearer"}},
-    #                          d._get_config_file_full_path(),
-    #                          'smlgit100_test_password')
-
-    # d.download_file_by_id('1Kd51Ig3UGwq6dtFvKjlgxfXb3i3ZrzwL',
-    #                       os.path.join(os.getcwd()))
-
-    # for i in d.get_root_file_tree(''):
-    #     res = i
-    # print(i._tree)
-
-    # print(d.create_file('1wLI1Xk2Rnswsahd7GK-qSg3m1ztBMDvD', 'testfile.txt',
-    #               datetime.datetime.utcnow(),
-    #               os.path.join(os.getcwd(), 'cbackup_test/local_root', 'file256k_plus1.txt')))

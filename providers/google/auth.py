@@ -92,11 +92,3 @@ def revoke_token(token):
     r = requests.post(GoogleServerData.access_token_domain + '/revoke',
                       params=params, headers=headers)
     r.raise_for_status()
-
-
-if __name__ == '__main__':
-    pass
-    # GoogleServerData.set_to_google_server()
-    # print(get_access_tokens('https://www.googleapis.com/auth/drive',
-    #                        GoogleServerData.client_id,
-    #                        GoogleServerData.client_secret))
