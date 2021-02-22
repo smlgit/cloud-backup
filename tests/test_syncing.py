@@ -224,6 +224,36 @@ class HiderClass(object):
                 self._download_store()
                 self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
+        def testLargeFile(self):
+
+            if test_utils.run_slow_tests is False:
+                self.skipTest('Slow tests being skipped.')
+
+            file_defs = [
+                {'name': 'file_50M_byte.txt', 'path': '', 'size': 50*1048577},
+            ]
+
+
+            self._setup_test_store(file_defs)
+
+            self._sync_drives()
+            self._download_store()
+            self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+
+            # Modify file
+            item_path = os.path.join(self.test_local_dir,
+                                     file_defs[0]['path'],
+                                     file_defs[0]['name'])
+
+            test_utils.make_random_file(item_path,
+                                        file_defs[0]['size'] - 1,
+                                        leave_existing=False)
+
+            self._sync_drives()
+            self._download_store()
+            self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+
+
 class TestSyncingGoogleDrive(HiderClass.TestSyncing):
 
     def setUp(self):
