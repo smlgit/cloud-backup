@@ -20,17 +20,13 @@ def main(args):
               'step for {}'.format(args.provider))
         return
 
-    print('Please enter your config file encryption password.')
-    print('Note: this only refers to the password used to encrypt your local config files.')
-    config_pw = getpass.getpass()
-
     print("Preparing to sync - press \'q\' then enter to stop the sync.")
 
     for res in sync.sync_drives(args.local_store_path, args.cpath,
                                 {'provider_name': args.provider,
                                   'user_id': args.user,
                                   'server_root_path': args.remote_store_path},
-                                config_pw,
+                                '',
                                 analyse_only=args.analyse_only):
 
         if check_for_user_quit() is True:

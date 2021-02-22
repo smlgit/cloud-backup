@@ -12,13 +12,9 @@ def main(args):
     drive_class = provider_list.get_drive_class(args.provider)
 
     if drive_class.required_config_is_present(args.cpath, args.user):
-        config_pw = getpass.getpass(
+        print(
             'Config file for this provider and user already exists - this will '
-            'redo authorization. Enter your existing password: ')
-    else:
-        config_pw = getpass.getpass(
-            'Enter a password that will be used to encrypt the auth config for this '
-            'provider and user: ')
+            'redo authorization.')
 
     drive = drive_class(args.user, args.cpath, config_pw)
     drive.run_token_acquisition()
