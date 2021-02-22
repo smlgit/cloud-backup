@@ -56,6 +56,10 @@ class StoreTree(object):
     def item_is_folder(item_dict):
         return 'folders' in item_dict or 'files' in item_dict
 
+    @property
+    def root_id(self):
+        return self._tree['id']
+
     def create_new_from_id(self, folder_id):
         """
 
@@ -162,6 +166,21 @@ class StoreTree(object):
 
         return None, None
 
+    def add_tree(self, tree, parent_id):
+        """
+        Will append the tree to the folders of the parent specified by parent id.
+        The ids in tree had better be different from those in self...
+
+        :param tree:
+        :param parent_id:
+        """
+
+        parent = self.find_item_by_id(parent_id)
+        if parent is None:
+            raise ValueError('Couldn\'t find parent with id {} in tree'.format(parent_id))
+
+        parent['folders'].append(tree._tree)
+
     def add_folder(self, id, name=None, parent_id=None):
         parent = self._tree
 
@@ -210,27 +229,6 @@ class StoreTree(object):
                 return parent['files'].pop(i)
 
         return None
-
-    def move_item(self, item_id, new_parent_id):
-        """
-        Make sure the new parent ISN'T A CHILD of the item to move.
-
-        :param item_id: the item to move.
-        :param new_parent_id: the new parent of the item to move.
-
-        """
-        child = self.remove_item(item_id)
-        if child is None:
-            raise ValueError('Couldn\'t find item {}'.format(item_id))
-
-        new_parent = self.find_item_by_id(new_parent_id)
-        if new_parent is None:
-            raise ValueError('Couldn\'t find item {}'.format(new_parent_id))
-
-        if StoreTree.item_is_folder(child):
-            new_parent['folders'].append(child)
-        else:
-            new_parent['files'].append(child)
 
     def get_folders(self):
         """

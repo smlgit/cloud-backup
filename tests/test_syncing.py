@@ -144,7 +144,6 @@ class HiderClass(object):
                                         self.config_pw):
                 pass
 
-        @unittest.SkipTest
         def testSyncBasicFileModify(self):
             file_defs = [
                 {'name': 'file_0_byte.txt', 'path': '','size': 0},

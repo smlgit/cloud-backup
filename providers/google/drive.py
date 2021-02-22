@@ -208,6 +208,14 @@ class GoogleDrive(object):
         root_id = self._get_root_folder()['id']
         result = StoreTree(id=root_id)
 
+        # Google returns items randomly, only specifying the parent id.
+        # We might not have received the parent item yet, so we maintain
+        # a list of trees, the first being our result, the others are
+        # "dangling" trees where the root item hasn't been received yet
+        # but has been mentioned as a parent of an item that HAS been
+        # received.
+        tree_list = [result]
+
         response_dict = None
         while response_dict is None or 'nextPageToken' in response_dict:
 
@@ -228,23 +236,39 @@ class GoogleDrive(object):
 
             for new_folder in response_dict['files']:
 
-                # First check if the parent exists in the tree. If not, we'll
-                # need to create it at the root level and update later.
-                parent = result.find_item_by_id(new_folder['parents'][0])
+                # First check if the parent exists in one of the trees tree. If not, we'll
+                # need to create it as the root of a new dangling tree and update later if/when
+                # it arrives.
+                parent_tree = None
+                for tree in tree_list:
+                    if tree.find_item_by_id(new_folder['parents'][0]) is not None:
+                        parent_tree = tree
+                        break
 
-                if parent is None:
-                    result.add_folder(new_folder['parents'][0])
+                if parent_tree is None:
+                    parent_tree = StoreTree(id=new_folder['parents'][0])
+                    tree_list.append(parent_tree)
 
-                # Now check if this folder has already been added as a parent
-                # (that will mean it is at the top level). If so, move it to
+                # Now check if this item has already been added as a parent
+                # (that will mean it is a tree root). If so, move it to
                 # its parent and update its name.
-                try:
-                    result.move_item(new_folder['id'], new_folder['parents'][0])
-                    result.update_folder_name(new_folder['id'], new_folder['name'])
-                except ValueError:
-                    # New folder doesn't exist, create a new one.
-                    result.add_folder(new_folder['id'], new_folder['name'],
-                                      new_folder['parents'][0])
+                added = False
+                for tree_index in range(0, len(tree_list)):
+                    tree = tree_list[tree_index]
+
+                    if tree.root_id == new_folder['id']:
+                        tree.update_folder_name(new_folder['id'],
+                                                new_folder['name'])
+                        parent_tree.add_tree(tree, new_folder['parents'][0])
+                        del tree_list[tree_index]
+                        added = True
+                        break
+
+                # New folder doesn't exist, create a new one.
+                if added is False:
+                    parent_tree.add_folder(new_folder['id'],
+                                           new_folder['name'],
+                                           new_folder['parents'][0])
 
         return result
 
@@ -289,7 +313,7 @@ class GoogleDrive(object):
 
             params = {
                 'q': 'mimeType != \'application/vnd.google-apps.folder\' and trashed = false',
-                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime, files/shared',
+                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime',
                 'pageSize': 1000}
             if isinstance(response_dict, dict) and 'nextPageToken' in response_dict:
                 params['pageToken'] = response_dict['nextPageToken']
@@ -305,11 +329,10 @@ class GoogleDrive(object):
             # For each file, add to tree
             for rx_file in response_dict['files']:
 
-                # Need to check for this because shared files/folders can have no parents. This
-                # will cause a dangling item in our tree root and theoretically we could delete
-                # it on sync with our local root.
-                # We only support the use of non-shared items at present.
-                if 'shared' in rx_file and rx_file['shared'] is False:
+                # Need to check for this because shared files/folders from some other drive
+                # can have no parents.
+                # We only support the use of files/folders on our drive.
+                if 'parents' in rx_file:
 
                     # Remember that our tree is now possibly cut down and only starts at some
                     # folder that isn't the drive root, so look for the parent first, and add
@@ -628,36 +651,6 @@ class GoogleDrive(object):
                                                                               'files', item_id]),
                              error_500_retries=5)
         r.raise_for_status()
-
-        # Unfortunately, Google Drive appears to take some time after a delete
-        # before everything actually is gone, especially when deleting a folder
-        # (i.e. its children seem to stick around for a while).
-        # So we query the drive after the delete and check that the item is gone
-        # and there are no children either. This is pretty easy because if there is
-        # a child, there will be an instance of the parent without a name.
-        # A bit messy, but better than tests failing intermittently.
-        retries = 0
-        max_retries = 20
-
-        while retries < max_retries:
-            done = True
-
-            for item in self.get_root_folder_tree().get_items():
-                if (item['id'] == item_id or
-                        (StoreTree.item_is_folder(item) and 'name' not in item)):
-                    done = False
-                    break
-
-            if done is True:
-                break
-            else:
-                logger.info('Waiting for Google Drive to actually delete the files...')
-                time.sleep(2)
-
-            retries += 1
-
-        if done is False or retries >= max_retries:
-            raise SystemError('Delete on Google Drive doesn\'t appear to have worked.')
 
 
 if __name__ == '__main__':
