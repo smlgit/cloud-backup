@@ -1,7 +1,13 @@
+"""
+A script to back up files that have changed on the local store
+to the specified cloud service.
+
+Change is determined by modify time.
+"""
+
 import argparse
 import os
 import logging
-import getpass
 import sync_drives.sync as sync
 import providers.provider_list as provider_list
 from common.basic_utils import check_for_user_quit

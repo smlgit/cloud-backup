@@ -1,6 +1,9 @@
+"""
+A script to run the authorization procedure for a given user and cloud service.
+"""
+
 import os
 import argparse
-import getpass
 import providers.provider_list as provider_list
 
 

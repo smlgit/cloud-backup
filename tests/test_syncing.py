@@ -14,10 +14,10 @@ from providers.google.server_metadata import GoogleServerData
 
 def _files_timestamp_ns_equal(ts1, ts2):
     """
-    Within 1 millisecond to be considered the same time (some
+    Within 1 second to be considered the same time (some
     providers only store to millisecond resolution).
     """
-    if abs(ts1 - ts2) <= 1000000:
+    if abs(ts1 - ts2) <= 1000000000:
         return True
 
     return False
