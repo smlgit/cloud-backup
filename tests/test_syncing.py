@@ -10,6 +10,8 @@ from common import tree_utils
 from sync_drives import sync
 from providers.google.drive import GoogleDrive
 from providers.google.server_metadata import GoogleServerData
+from providers.microsoft.server_metadata import MicrosoftServerData
+from providers.microsoft.drive import OneDrive
 
 
 def _files_timestamp_ns_equal(ts1, ts2):
@@ -105,7 +107,9 @@ class HiderClass(object):
 
             # Clear server store
             drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
-            server_tree = drive.get_root_file_tree('')
+
+            for r in drive.get_root_file_tree(''):
+                server_tree = r
             server_test_sandbox = server_tree.find_item_by_path(
                 self.server_test_folder_parent_path,
                 is_path_to_file=False)
@@ -151,6 +155,10 @@ class HiderClass(object):
                 {'name': 'file_1_byte.txt', 'path': '', 'size': 1},
                 {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1},
                 {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024},
+                {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1},
+                {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1},
+                {'name': 'file_320k_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024},
+                {'name': 'file_320k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024 + 1},
 
                 # Empty directories
                 {'name': 'empty_dir1', 'path': '', 'size': -1},
@@ -226,7 +234,7 @@ class HiderClass(object):
                 self._download_store()
                 self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        #@unittest.SkipTest
+
         def testLargeFile(self):
 
             if test_utils.run_slow_tests is False:
@@ -256,9 +264,6 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        def testDummy(self):
-            d = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
-
 
 class TestSyncingGoogleDrive(HiderClass.TestSyncing):
 
@@ -269,3 +274,13 @@ class TestSyncingGoogleDrive(HiderClass.TestSyncing):
         self.provider_name = 'google'
         self.drive_class = GoogleDrive
         super(TestSyncingGoogleDrive, self).setUp()
+
+class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+
+    def setUp(self):
+        MicrosoftServerData.set_to_microsoft_server()
+        self.account_id = 'smlgit'
+        self.config_pw = ''
+        self.provider_name = 'microsoft'
+        self.drive_class = OneDrive
+        super(TestSyncingMicrosoftDrive, self).setUp()

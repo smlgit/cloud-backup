@@ -200,7 +200,6 @@ class OneDrive(object):
             MicrosoftServerData.client_id,
             self._config['auth']['refresh_token'])
 
-        print(res_dict)
         self._config['auth'].update(res_dict)
         self._config['auth']['expires_at'] =\
             datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(
@@ -217,25 +216,12 @@ class OneDrive(object):
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
-            params={'select': 'id,name,lastModifiedDateTime'})
+            params={'select': 'id,name,fileSystemInfo'})
         r.raise_for_status()
         return r.json()
 
 
-    def _upload_file(self, parent_id, file_path, file_name, modified_datetime):
-        # Create an upload session
-        r = self._do_request(
-            'post',
-            http_server_utils.join_url_components(
-                [self._api_drive_endpoint_prefix, 'items/{}:/{}:/createUploadSession'.format(
-                    parent_id, file_name)]),
-            json={
-                "name": file_name,
-                "lastModifiedDateTime": _convert_dt_to_onedrive_string(modified_datetime) })
-
-        r.raise_for_status()
-
-        upload_url = r.json()['uploadUrl']
+    def _upload_file(self, upload_url, file_path):
 
         send_in_multiples_of = 320 * 1024
         max_multiples = 15
@@ -265,7 +251,7 @@ class OneDrive(object):
                 rx_dict = r.json()
 
                 if 'nextExpectedRanges' in rx_dict:
-                    current_pos = int(rx_dict['nextExpectedRanges'][0].split('-'))
+                    current_pos = int(rx_dict['nextExpectedRanges'][0].split('-')[0])
                 elif r.status_code == 200 or r.status_code == 201:
                     # Success
                     return rx_dict['id']
@@ -273,7 +259,16 @@ class OneDrive(object):
                     raise SystemError('Upload response from OneDrive wasn\'t didn\'t '
                                       'include expected ranges item')
 
+                f.seek(current_pos)
 
+
+    def _update_file_last_modified(self, item_id, modified_datetime):
+        r = self._do_request(
+            'patch',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
+            json={'fileSystemInfo': {'lastModifiedDateTime': _convert_dt_to_onedrive_string(modified_datetime)}})
+        r.raise_for_status()
 
 
     def get_root_file_tree(self, root_folder_path=''):
@@ -316,7 +311,7 @@ class OneDrive(object):
                 self._add_request_to_batch(
                     batch, 'GET',
                     '/me/drive/items/{}/children'.format(stack.pop()),
-                    params={'select': 'id,name,folder,file,parentReference,lastModifiedDateTime'})
+                    params={'select': 'id,name,folder,file,parentReference,fileSystemInfo'})
 
             rx_dict = None
             while rx_dict is None or '@odata.nextLink' in rx_dict:
@@ -342,9 +337,10 @@ class OneDrive(object):
                             else:
                                 result_tree.add_file(item['id'], name=item['name'],
                                                      parent_id=item['parentReference']['id'],
-                                                     modified_datetime=date_parser.isoparse(item['lastModifiedDateTime']))
+                                                     modified_datetime=date_parser.isoparse(item['fileSystemInfo']['lastModifiedDateTime']))
 
-                yield result_tree
+            yield result_tree
+
 
     def create_folder(self, parent_id, name):
         """
@@ -361,6 +357,108 @@ class OneDrive(object):
         r.raise_for_status()
         return r.json()['id']
 
+
+    def create_folder_by_path(self, folder_path):
+        """
+        Creates a folder as specfified by folder_path.
+        Folders in the path are checked for existence and created if they aren't
+        already.
+
+        :param folder_path: path to new folder from the server root.
+        :return: the id of the created folder.
+        """
+
+        # TODO: This is slow - would be quicker to traverse the server directories.
+        for r in self.get_root_file_tree():
+            root_folder_tree = r
+
+        current_parent_id = root_folder_tree.find_item_by_path('', is_path_to_file=False)['id']
+
+        path_folders = StoreTree.get_path_levels(folder_path)
+
+        if path_folders[0] == '':
+            return current_parent_id
+
+        current_path = ''
+        for folder_name in path_folders:
+            new_parent = root_folder_tree.find_item_by_path(
+                StoreTree.concat_paths([current_path, folder_name]))
+            if new_parent is None:
+                # Need to make on the server
+                new_parent_id = self.create_folder(current_parent_id, folder_name)
+                root_folder_tree.add_folder(new_parent_id, name=folder_name, parent_id=current_parent_id)
+                current_parent_id = new_parent_id
+            else:
+                current_parent_id = new_parent['id']
+
+            current_path = StoreTree.concat_paths([current_path, folder_name])
+
+        return current_parent_id
+
+
+    def create_file(self, parent_id, name, modified_datetime, file_local_path):
+        if os.stat(file_local_path).st_size > 0:
+
+            # Create an upload session
+            r = self._do_request(
+                'post',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'items/{}:/{}:/createUploadSession'.format(
+                        parent_id, name)]))
+
+            r.raise_for_status()
+            file_id = self._upload_file(r.json()['uploadUrl'], file_local_path)
+
+            self._update_file_last_modified(file_id, modified_datetime)
+        else:
+
+            # Create zero length file
+            r = self._do_request(
+                'put',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'items/{}:/{}:/content'.format(
+                        parent_id, name)]))
+            r.raise_for_status()
+            file_id = r.json()['id']
+
+            self._update_file_last_modified(file_id, modified_datetime)
+
+        return file_id
+
+
+    def update_file(self, file_id, modified_datetime, file_local_path):
+        """
+
+        :param file_id: The id of the file to update.
+        :param modified_datetime: Modified time.
+        :param file_local_path:
+        :return: True if successful.
+        """
+
+        if os.stat(file_local_path).st_size > 0:
+            # Create an upload session
+            r = self._do_request(
+                'post',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'items/{}/createUploadSession'.format(file_id)]),
+                json={
+                    'fileSystemInfo': {"lastModifiedDateTime": _convert_dt_to_onedrive_string(modified_datetime)}})
+
+            r.raise_for_status()
+
+            self._upload_file(r.json()['uploadUrl'], file_local_path)
+            self._update_file_last_modified(file_id, modified_datetime)
+        else:
+            # Create zero length file
+            r = self._do_request(
+                'put',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)]))
+            r.raise_for_status()
+
+            self._update_file_last_modified(file_id, modified_datetime)
+
+
     def delete_item_by_id(self, item_id):
         r = self._do_request('delete',
                              http_server_utils.join_url_components(
@@ -374,16 +472,6 @@ class OneDrive(object):
         file_meta = self._get_file_metadata(file_id)
         if output_filename is None:
             output_filename = file_meta['name']
-
-        # Get download url
-        # r = self._do_request('get',
-        #     http_server_utils.join_url_components(
-        #         [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)]))
-        # r.raise_for_status()
-        #
-        # if r.status_code != 302:
-        #     print(r.content)
-        #     raise SystemError('Couldn\'t initiate download from OneDrive')
 
         url = http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)])
@@ -406,7 +494,7 @@ class OneDrive(object):
             # Set modified time
             os.utime(os.path.join(output_dir_path, output_filename),
                      times=(datetime.datetime.utcnow().timestamp(),
-                            date_parser.isoparse(file_meta['lastModifiedDateTime']).timestamp()))
+                            date_parser.isoparse(file_meta['fileSystemInfo']['lastModifiedDateTime']).timestamp()))
 
 
 if __name__ == '__main__':
@@ -415,9 +503,16 @@ if __name__ == '__main__':
     d = OneDrive('smlgit', os.getcwd(), '')
     #d.run_token_acquisition()
 
-    id = d._upload_file('6F4A41C3EA05C074!101',
-                        os.path.join(os.getcwd(), 'testfile.txt'),
-                        'testfile2.txt',
-                        datetime.datetime.now(tz=datetime.timezone.utc))
+    id = d.create_file('6F4A41C3EA05C074!101',
+                       'testfile.txt',
+                       datetime.datetime.now(tz=datetime.timezone.utc),
+                       os.path.join(os.getcwd(), 'testfile.txt'))
     print(id)
-    d.download_file_by_id(id, os.getcwd(), 'new_testfile2.txt')
+
+    d.update_file(id, datetime.datetime.now(tz=datetime.timezone.utc),
+                  os.path.join(os.getcwd(), 'testfile.txt'))
+
+    # for r in d.get_root_file_tree():
+    #     res = r
+    #
+    # print(res._tree)

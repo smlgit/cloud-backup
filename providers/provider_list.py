@@ -1,8 +1,10 @@
 from providers.google.drive import GoogleDrive, GoogleServerData
+from providers.microsoft.drive import OneDrive, MicrosoftServerData
 
 
 _implementations = {
-    'google': {'drive': GoogleDrive}
+    'google': {'drive': GoogleDrive},
+    'microsoft': {'drive': OneDrive}
 }
 
 
@@ -23,3 +25,4 @@ def init_providers():
     :return: None
     """
     GoogleServerData.set_to_google_server()
+    MicrosoftServerData.set_to_microsoft_server()
