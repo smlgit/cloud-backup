@@ -21,6 +21,10 @@ _onedrive_scope = 'offline_access Files.ReadWrite.All'
 _onedrive_batching_limt = 20
 
 
+def _convert_dt_to_onedrive_string(dt):
+    return dt.isoformat().split('+')[0] + 'Z'
+
+
 def _get_config_file_name(account_name):
     return account_name + '-ms-cbconfig.data'
 
@@ -85,15 +89,17 @@ class OneDrive(object):
         return (self._config['auth']['expires_at'] <
                 datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(minutes=5))
 
-    def _do_request(self, method, url, headers={}, params={}, data={}, json=None):
+
+    def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
+                    error_500_retries=0, omit_auth_header=False):
         """
-        Does a standard requests.get call with the passed params but also:
+        Does a standard requests call with the passed params but also:
             1. Checks to see if a token refresh is required
             2. Sets the authorization header
 
         :param method: one of 'get', 'post', 'put', 'delete'
         :param error_500_retries: set to the number of retries when encountering
-        Google's pesky 500 Server Error: Internal Server Error error.
+        a pesky 5XX Server Error.
         :return: whatever is returned from a requests call
         """
 
@@ -111,13 +117,36 @@ class OneDrive(object):
         if self._refresh_token_required():
             self.refresh_token()
 
-        headers['Authorization'] = self._get_auth_header()
-        r = func(url, headers=headers, params=params, data=data, json=json)
+        retries = 0
+
+        r = None
+        current_sleep_time = 1
+
+        while retries <= error_500_retries:
+
+            if omit_auth_header == False:
+                headers['Authorization'] = self._get_auth_header()
+            r = func(url, headers=headers, params=params, data=data, json=json)
+            if r.status_code != 500:
+                break
+
+            logger.warning('Received an HTTP 500 error from the Google server...')
+            time.sleep(current_sleep_time)
+            retries += 1
+            current_sleep_time *= 2
 
         if r.status_code == 429:
             j = r.json()
             print('Response returned too many requests:')
             print(j)
+
+        try:
+            j = r.json()
+            if 'error' in j:
+                logger.warning('Error from OneDrive: {} - {}'.format(
+                    j['error']['code'], j['error']['message']))
+        except:
+            pass
 
         return r
 
@@ -182,6 +211,70 @@ class OneDrive(object):
     def revoke_token(self):
         logger.warning('Revoke token not used on Microsoft - they refresh both '
                              'access AND refresh token.')
+
+    def _get_file_metadata(self, item_id):
+        r = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
+            params={'select': 'id,name,lastModifiedDateTime'})
+        r.raise_for_status()
+        return r.json()
+
+
+    def _upload_file(self, parent_id, file_path, file_name, modified_datetime):
+        # Create an upload session
+        r = self._do_request(
+            'post',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'items/{}:/{}:/createUploadSession'.format(
+                    parent_id, file_name)]),
+            json={
+                "name": file_name,
+                "lastModifiedDateTime": _convert_dt_to_onedrive_string(modified_datetime) })
+
+        r.raise_for_status()
+
+        upload_url = r.json()['uploadUrl']
+
+        send_in_multiples_of = 320 * 1024
+        max_multiples = 15
+
+        total_length = os.stat(file_path).st_size
+        current_pos = 0
+
+        with open(file_path, mode='rb') as f:
+            while True:
+                left_to_send = total_length - current_pos
+
+                if (left_to_send // send_in_multiples_of) >= max_multiples:
+                    num_to_send = send_in_multiples_of * max_multiples
+                else:
+                    num_to_send = (left_to_send // send_in_multiples_of) * send_in_multiples_of
+                    if num_to_send == 0:
+                        num_to_send = left_to_send % send_in_multiples_of
+
+                header = {'Content-Range': 'bytes {}-{}/{}'.format(
+                    current_pos, current_pos + num_to_send - 1, total_length)}
+                data = f.read(num_to_send)
+
+                r = self._do_request('put', upload_url, headers=header,
+                                     data=data, error_500_retries=10,
+                                     omit_auth_header=True)
+                r.raise_for_status()
+                rx_dict = r.json()
+
+                if 'nextExpectedRanges' in rx_dict:
+                    current_pos = int(rx_dict['nextExpectedRanges'][0].split('-'))
+                elif r.status_code == 200 or r.status_code == 201:
+                    # Success
+                    return rx_dict['id']
+                else:
+                    raise SystemError('Upload response from OneDrive wasn\'t didn\'t '
+                                      'include expected ranges item')
+
+
+
 
     def get_root_file_tree(self, root_folder_path=''):
         """
@@ -253,12 +346,78 @@ class OneDrive(object):
 
                 yield result_tree
 
+    def create_folder(self, parent_id, name):
+        """
+        :param parent_id: parent folder id.
+        :param name: name of new folder.
+        :return: the id of the created folder.
+        """
+        r = self._do_request(
+            'post',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'items/{}/children'.format(parent_id)]),
+            json={"name": name, "folder": {} })
+
+        r.raise_for_status()
+        return r.json()['id']
+
+    def delete_item_by_id(self, item_id):
+        r = self._do_request('delete',
+                             http_server_utils.join_url_components(
+                                 [self._api_drive_endpoint_prefix,
+                                  'items/{}'.format(item_id)]
+                             ))
+        r.raise_for_status()
+
+    def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
+        # Get the modified time and name
+        file_meta = self._get_file_metadata(file_id)
+        if output_filename is None:
+            output_filename = file_meta['name']
+
+        # Get download url
+        # r = self._do_request('get',
+        #     http_server_utils.join_url_components(
+        #         [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)]))
+        # r.raise_for_status()
+        #
+        # if r.status_code != 302:
+        #     print(r.content)
+        #     raise SystemError('Couldn\'t initiate download from OneDrive')
+
+        url = http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)])
+
+        # Download the data
+        # Special requests mode for streaming large files
+
+        if self._refresh_token_required():
+            self.refresh_token()
+
+        with requests.get(url,
+                          headers={'Authorization': self._get_auth_header()},) as r:
+            r.raise_for_status()
+            os.makedirs(output_dir_path, exist_ok=True)
+
+            with open(os.path.join(output_dir_path, output_filename), 'wb') as f:
+                for chunk in r.iter_content(chunk_size=128):
+                    f.write(chunk)
+
+            # Set modified time
+            os.utime(os.path.join(output_dir_path, output_filename),
+                     times=(datetime.datetime.utcnow().timestamp(),
+                            date_parser.isoparse(file_meta['lastModifiedDateTime']).timestamp()))
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     MicrosoftServerData.set_to_microsoft_server()
     d = OneDrive('smlgit', os.getcwd(), '')
     #d.run_token_acquisition()
 
-    for res in d.get_root_file_tree(''):
-        tree = res
-    print(tree._tree)
+    id = d._upload_file('6F4A41C3EA05C074!101',
+                        os.path.join(os.getcwd(), 'testfile.txt'),
+                        'testfile2.txt',
+                        datetime.datetime.now(tz=datetime.timezone.utc))
+    print(id)
+    d.download_file_by_id(id, os.getcwd(), 'new_testfile2.txt')
