@@ -80,8 +80,6 @@ class GoogleDrive(object):
                                                self._config['account_name']),
                     self._config_pw
                 )
-
-                print(self._config['auth']['refresh_token'])
             except ValueError as err:
                 # Probably password error, re-raise
                 raise err
@@ -274,7 +272,7 @@ class GoogleDrive(object):
 
         return result
 
-    def get_root_folder_tree(self, root_folder_path=''):
+    def _get_root_folder_tree(self, root_folder_path=''):
         """
 
         :param root_folder_path: the path to the root folder of the desired store.
@@ -306,7 +304,7 @@ class GoogleDrive(object):
         """
 
         # First get the folder tree
-        tree = self.get_root_folder_tree(root_folder_path)
+        tree = self._get_root_folder_tree(root_folder_path)
 
         # Get the files
 
@@ -377,7 +375,7 @@ class GoogleDrive(object):
         :param folder_path: path to new folder from the server root.
         :return: the id of the created folder.
         """
-        root_folder_tree = self.get_root_folder_tree()
+        root_folder_tree = self._get_root_folder_tree()
         current_parent_id = root_folder_tree.find_item_by_path('', is_path_to_file=False)['id']
 
         path_folders = StoreTree.get_path_levels(folder_path)

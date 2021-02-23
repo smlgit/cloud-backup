@@ -105,7 +105,7 @@ class HiderClass(object):
 
             # Clear server store
             drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
-            server_tree = drive.get_root_folder_tree('')
+            server_tree = drive.get_root_file_tree('')
             server_test_sandbox = server_tree.find_item_by_path(
                 self.server_test_folder_parent_path,
                 is_path_to_file=False)
@@ -144,7 +144,7 @@ class HiderClass(object):
                                         self.config_pw):
                 pass
 
-        @unittest.SkipTest
+        #@unittest.SkipTest
         def testSyncBasicFileModify(self):
             file_defs = [
                 {'name': 'file_0_byte.txt', 'path': '','size': 0},
@@ -193,7 +193,7 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        @unittest.SkipTest
+        #@unittest.SkipTest
         def testDeleteItem(self):
 
             file_defs = [
@@ -226,7 +226,7 @@ class HiderClass(object):
                 self._download_store()
                 self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        @unittest.SkipTest
+        #@unittest.SkipTest
         def testLargeFile(self):
 
             if test_utils.run_slow_tests is False:
