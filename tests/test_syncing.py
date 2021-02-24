@@ -12,6 +12,8 @@ from providers.google.drive import GoogleDrive
 from providers.google.server_metadata import GoogleServerData
 from providers.microsoft.server_metadata import MicrosoftServerData
 from providers.microsoft.drive import OneDrive
+from providers.pcloud.drive import PcloudDrive
+from providers.pcloud.server_metadata import PcloudServerData
 
 
 def _files_timestamp_ns_equal(ts1, ts2):
@@ -154,16 +156,16 @@ class HiderClass(object):
                 {'name': 'file_0_byte.txt', 'path': '','size': 0},
                 {'name': 'file_1_byte.txt', 'path': '', 'size': 1},
                 {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1},
-                {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024},
-                {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1},
-                {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1},
-                {'name': 'file_320k_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024},
-                {'name': 'file_320k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024 + 1},
-
-                # Empty directories
-                {'name': 'empty_dir1', 'path': '', 'size': -1},
-                {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
-                {'name': 'empty_dir3', 'path': 'folder1', 'size': -1},
+                # {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024},
+                # {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1},
+                # {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1},
+                # {'name': 'file_320k_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024},
+                # {'name': 'file_320k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024 + 1},
+                #
+                # # Empty directories
+                # {'name': 'empty_dir1', 'path': '', 'size': -1},
+                # {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
+                # {'name': 'empty_dir3', 'path': 'folder1', 'size': -1},
             ]
 
             # All new files
@@ -201,7 +203,7 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        #@unittest.SkipTest
+        @unittest.SkipTest
         def testDeleteItem(self):
 
             file_defs = [
@@ -275,12 +277,21 @@ class HiderClass(object):
 #         self.drive_class = GoogleDrive
 #         super(TestSyncingGoogleDrive, self).setUp()
 
-class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+# class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         MicrosoftServerData.set_to_microsoft_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'microsoft'
+#         self.drive_class = OneDrive
+#         super(TestSyncingMicrosoftDrive, self).setUp()
 
+class TestSyncingPcloudDrive(HiderClass.TestSyncing):
     def setUp(self):
-        MicrosoftServerData.set_to_microsoft_server()
+        PcloudServerData.set_to_pcloud_server()
         self.account_id = 'smlgit'
         self.config_pw = ''
-        self.provider_name = 'microsoft'
-        self.drive_class = OneDrive
-        super(TestSyncingMicrosoftDrive, self).setUp()
+        self.provider_name = 'pcloud'
+        self.drive_class = PcloudDrive
+        super(TestSyncingPcloudDrive, self).setUp()

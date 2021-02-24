@@ -90,7 +90,8 @@ class PcloudDrive(object):
 
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
-                    server_error_retries=10, raise_for_status=True):
+                    files={}, server_error_retries=10, raise_for_status=True,
+                    session=None):
         """
         Does a standard requests call with the passed params but also:
             1. Sets the authorization header
@@ -103,16 +104,18 @@ class PcloudDrive(object):
         :return: (r, rx_dict) tuple
         """
 
+        call_object = requests if session is None else session
+
         if method == 'get':
-            func = requests.get
+            func = call_object.get
         elif method == 'post':
-            func = requests.post
+            func = call_object.post
         elif method == 'put':
-            func = requests.put
+            func = call_object.put
         elif method == 'patch':
-            func = requests.patch
+            func = call_object.patch
         elif method == 'delete':
-            func = requests.delete
+            func = call_object.delete
 
         rx_dict = {}
 
@@ -122,7 +125,7 @@ class PcloudDrive(object):
         while True:
 
             headers['Authorization'] = self._get_auth_header()
-            r = func(url, headers=headers, params=params, data=data, json=json)
+            r = func(url, headers=headers, params=params, data=data, json=json, files=files)
 
 
             # Success
@@ -210,6 +213,51 @@ class PcloudDrive(object):
         return rx_dict['metadata']
 
 
+    def _get_item_metadata(self, item_id):
+        # Have to work out if a file or folder by doing this jiggery-pokery...
+        try:
+            r = requests.get(
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'stat']),
+                headers={'Authorization': self._get_auth_header()},
+                params={'fileid': item_id})
+
+            return r.json()['metadata']
+        except:
+            r, rx_dict = self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'listfolder']),
+                params={'folderid': item_id})
+
+            return rx_dict['metadata']
+
+
+    def _upload_file(self, file_local_path, parent_id, name, modified_datetime):
+
+        if os.stat(file_local_path).st_size > 0:
+            with open(file_local_path, 'rb') as f:
+                r, rx_dict = self._do_request(
+                    'put',
+                    http_server_utils.join_url_components(
+                        [self._api_drive_endpoint_prefix, 'uploadfile']),
+                    params={'folderid': parent_id, 'filename': name, 'nopartial': 1,
+                            'mtime': int(modified_datetime.timestamp())},
+                    data=f)
+        else:
+            # Zero byte file
+            # Can only get this to work using the post/multipart encoding method.
+            r, rx_dict = self._do_request(
+                'post',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'uploadfile']),
+                params={'folderid': parent_id, 'filename': name, 'nopartial': 1,
+                        'mtime': int(modified_datetime.timestamp())},
+                files={'file': (name, '')})
+
+        return _item_id_from_id_str(rx_dict['metadata'][0]['id'])
+
+
     def get_root_file_tree(self, root_folder_path=''):
         """
         This is a generator function. Each iteration returned will be an instance
@@ -247,7 +295,143 @@ class PcloudDrive(object):
                                          parent_id=_item_id_from_id_str(parent_item['id']),
                                          modified_datetime=_convert_pcloud_string_to_dt(item['modified']))
 
-        return result_tree
+            yield result_tree
+
+
+    def create_file(self, parent_id, name, modified_datetime, file_local_path):
+        """
+
+        :param file_id: The id of the file to update.
+        :param modified_datetime: Modified time.
+        :param file_local_path:
+        :return: True if successful.
+        """
+
+        return self._upload_file(file_local_path, parent_id, name, modified_datetime)
+
+
+    def update_file(self, file_id, modified_datetime, file_local_path):
+        # Get parent id
+        meta_dict = self._get_item_metadata(file_id)
+
+        parent_id = int(meta_dict['parentfolderid'])
+        name = meta_dict['name']
+
+        return self._upload_file(file_local_path, parent_id, name, modified_datetime)
+
+
+    def create_folder(self, parent_id, name):
+        """
+        :param parent_id: parent folder id.
+        :param name: name of new folder.
+        :return: the id of the created folder.
+        """
+
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'createfolderifnotexists']),
+            params={'folderid': parent_id, 'name': name})
+
+        return _item_id_from_id_str(rx_dict['metadata']['id'])
+
+
+    def create_folder_by_path(self, folder_path):
+        """
+        Creates a folder as specfified by folder_path.
+        Folders in the path are checked for existence and created if they aren't
+        already.
+
+        :param folder_path: path to new folder from the server root.
+        :return: the id of the created folder.
+        """
+
+        folder_path = _pcloud_path_standardise(folder_path)
+
+        current_parent_id = _item_id_from_id_str(self._get_root_metadata()['id'])
+
+        path_folders = StoreTree.get_path_levels(folder_path)
+
+        if path_folders[0] == '':
+            return current_parent_id
+
+        for folder_name in path_folders:
+            current_parent_id = self.create_folder(current_parent_id, folder_name)
+
+        return current_parent_id
+
+
+    def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
+        # Get the modified time and name
+        file_meta = self._get_item_metadata(file_id)
+        file_length = int(file_meta['size'])
+
+        if output_filename is None:
+            output_filename = file_meta['name']
+
+        # Seems like we have to use low level file ops to do downloads.
+        # This requires a file descriptor and this gets closed when the connection
+        # closes, so we need to use a session.
+        #
+        with requests.Session() as session:
+
+            # Open file descriptor
+            r, rx_dict = self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'file_open']),
+                params={'flags': 0, 'fileid': file_id},
+            session=session)
+
+            fd = rx_dict['fd']
+
+            # Download the data
+
+            with open(os.path.join(output_dir_path, output_filename), 'wb') as f:
+
+                bytes_read = 0
+
+                while bytes_read < file_length:
+                    r, rx_dict = self._do_request(
+                        'get',
+                        http_server_utils.join_url_components(
+                            [self._api_drive_endpoint_prefix, 'file_read']),
+                        params={'fd': fd, 'count': 1048576},
+                        session=session)
+
+                    f.write(r.content)
+                    bytes_read += len(r.content)
+
+            # Close the file descriptor
+            self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'file_close']),
+                params={'fd': fd},
+            session=session)
+
+        # Set modified time
+        os.utime(os.path.join(output_dir_path, output_filename),
+                 times=(datetime.datetime.utcnow().timestamp(),
+                        _convert_pcloud_string_to_dt(file_meta['modified']).timestamp()))
+
+
+    def delete_item_by_id(self, item_id):
+        # Work out if its a file or folder
+        meta_dict = self._get_item_metadata(item_id)
+
+        if meta_dict['isfolder'] == True:
+            self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'deletefolderrecursive']),
+                params={'folderid': item_id})
+        else:
+            self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'deletefile']),
+                params={'fileid': item_id})
 
 
 if __name__ == '__main__':
@@ -255,4 +439,18 @@ if __name__ == '__main__':
     PcloudServerData.set_to_pcloud_server()
     d = PcloudDrive('smlgit', os.getcwd(), '')
 
-    print(d.get_root_file_tree()._tree)
+    # print(d.create_file(0, 'zerobyte.txt', datetime.datetime.now(tz=datetime.timezone.utc),
+    #                     os.path.join(os.getcwd(), 'zerobyte.txt')))
+    # print(d.update_file(28415559278, datetime.datetime.now(tz=datetime.timezone.utc),
+    #                     os.path.join(os.getcwd(), 'zerobyte.txt')))
+
+    # for res in d.get_root_file_tree():
+    #     t = res
+    #
+    # print(t._tree)
+
+    print(d._get_item_metadata(8561599268))
+    print(d._get_item_metadata(28411151775))
+
+    # d.download_file_by_id(28411151775, os.getcwd(), 'testdown.txt')
+    # print(d._get_file_metadata(28411151775))
