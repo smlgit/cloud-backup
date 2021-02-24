@@ -101,7 +101,7 @@ class GoogleDrive(object):
                 datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(minutes=5))
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
-                    error_500_retries=0):
+                    error_500_retries=0, raise_for_status=True):
         """
         Does a standard requests.get call with the passed params but also:
             1. Checks to see if a token refresh is required
@@ -142,6 +142,9 @@ class GoogleDrive(object):
             time.sleep(current_sleep_time)
             retries += 1
             current_sleep_time *= 2
+
+        if raise_for_status == True:
+            r.raise_for_status()
 
         return r
 
@@ -187,7 +190,6 @@ class GoogleDrive(object):
                              http_server_utils.join_url_components(
                                  [self._api_drive_endpoint_prefix, 'files', 'root']),
                              error_500_retries=5)
-        r.raise_for_status()
         return r.json()
 
     def _get_file_metadata(self, file_id):
@@ -196,7 +198,6 @@ class GoogleDrive(object):
                                  [self._api_drive_endpoint_prefix, 'files', file_id]),
                              params={'fields': 'name, parents, modifiedTime'},
                              error_500_retries=5)
-        r.raise_for_status()
         return r.json()
 
     def _get_drive_folder_tree(self):
@@ -230,7 +231,6 @@ class GoogleDrive(object):
                                                                                'files']),
                                  params=params,
                                  error_500_retries=5)
-            r.raise_for_status()
 
             response_dict = r.json()
 
@@ -323,7 +323,6 @@ class GoogleDrive(object):
                                  params=params,
                                  error_500_retries=5)
 
-            r.raise_for_status()
             response_dict = r.json()
 
             # For each file, add to tree
@@ -363,7 +362,6 @@ class GoogleDrive(object):
                              },
             error_500_retries=5)
 
-        r.raise_for_status()
         return r.json()['id']
 
     def create_folder_by_path(self, folder_path):
@@ -414,7 +412,8 @@ class GoogleDrive(object):
         while retries < num_retries:
             time.sleep(wait_time)
             r = self._do_request('put', session_url,
-                                 headers={'Content-Range': '*/{}'.format(total_file_len)})
+                                 headers={'Content-Range': '*/{}'.format(total_file_len)},
+                                 raise_for_status=False)
             retries += 1
             wait_time *= 2
 
@@ -475,7 +474,8 @@ class GoogleDrive(object):
                         current_pos, current_pos + num_to_send - 1, total_length)}
                     data = f.read(num_to_send)
 
-                r = self._do_request('put', session_url, headers=header, data=data)
+                r = self._do_request('put', session_url, headers=header, data=data,
+                                     raise_for_status=False)
 
                 if r.status_code == 403:
                     # Must restart
@@ -536,7 +536,6 @@ class GoogleDrive(object):
                              },
                              error_500_retries=5)
 
-        r.raise_for_status()
         return r.json()['id']
 
     def create_file(self, parent_id, name, modified_datetime, file_local_path):
@@ -565,8 +564,6 @@ class GoogleDrive(object):
                                      'parents': [parent_id]
                                  },
                              error_500_retries=5)
-
-            r.raise_for_status()
 
             session_url = r.headers['Location']
 
@@ -600,8 +597,6 @@ class GoogleDrive(object):
                                  json={
                                      'modifiedTime': convert_dt_to_google_string(modified_datetime)
                                  })
-
-            r.raise_for_status()
 
             session_url = r.headers['Location']
 
@@ -650,5 +645,4 @@ class GoogleDrive(object):
         r = self._do_request('delete', http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
                                                                               'files', item_id]),
                              error_500_retries=5)
-        r.raise_for_status()
 

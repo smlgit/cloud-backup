@@ -91,7 +91,7 @@ class OneDrive(object):
 
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
-                    error_500_retries=0, omit_auth_header=False):
+                    error_500_retries=5, raise_for_status=True, omit_auth_header=False):
         """
         Does a standard requests call with the passed params but also:
             1. Checks to see if a token refresh is required
@@ -127,18 +127,31 @@ class OneDrive(object):
             if omit_auth_header == False:
                 headers['Authorization'] = self._get_auth_header()
             r = func(url, headers=headers, params=params, data=data, json=json)
-            if r.status_code != 500:
+
+            if r.status_code >= 500 and r.status_code < 600:
+                # Server error, do exponential backoff
+
+                logger.warning('Sleeping for {} seconds as a result of OneDrive {} request...'.format(
+                    current_sleep_time, r.status_code))
+                time.sleep(current_sleep_time)
+                retries += 1
+                current_sleep_time *= 2
+            elif r.status_code == 429:
+                # Explicit backoff request
+
+                # Clear 500 retries and times
+                current_sleep_time = 1
+                retries = 0
+
+                if 'Retry-After' in r.headers:
+                    time.sleep(float(r.headers['Retry-After']))
+                else:
+                    raise ValueError('Expected Retry-After header in OneDrive 429 response...')
+
+                logger.warning('Sleeping for {} seconds as a result of OneDrive 429 request...')
+            else:
+                # Success
                 break
-
-            logger.warning('Received an HTTP 500 error from the Google server...')
-            time.sleep(current_sleep_time)
-            retries += 1
-            current_sleep_time *= 2
-
-        if r.status_code == 429:
-            j = r.json()
-            print('Response returned too many requests:')
-            print(j)
 
         try:
             j = r.json()
@@ -147,6 +160,9 @@ class OneDrive(object):
                     j['error']['code'], j['error']['message']))
         except:
             pass
+
+        if raise_for_status == True:
+            r.raise_for_status()
 
         return r
 
@@ -211,13 +227,26 @@ class OneDrive(object):
         logger.warning('Revoke token not used on Microsoft - they refresh both '
                              'access AND refresh token.')
 
+
+    def _get_root_metadata(self):
+        """
+        Returns the metadata dict for the root of the server drive.
+        :return:
+        """
+        r = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'root']),
+            params={'select': 'id,name,fileSystemInfo'})
+        return r.json()
+
+
     def _get_file_metadata(self, item_id):
         r = self._do_request(
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
             params={'select': 'id,name,fileSystemInfo'})
-        r.raise_for_status()
         return r.json()
 
 
@@ -247,7 +276,6 @@ class OneDrive(object):
                 r = self._do_request('put', upload_url, headers=header,
                                      data=data, error_500_retries=10,
                                      omit_auth_header=True)
-                r.raise_for_status()
                 rx_dict = r.json()
 
                 if 'nextExpectedRanges' in rx_dict:
@@ -268,7 +296,6 @@ class OneDrive(object):
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
             json={'fileSystemInfo': {'lastModifiedDateTime': _convert_dt_to_onedrive_string(modified_datetime)}})
-        r.raise_for_status()
 
 
     def get_root_file_tree(self, root_folder_path=''):
@@ -293,7 +320,6 @@ class OneDrive(object):
                                  [self._api_drive_endpoint_prefix,
                                   'root:/{}'.format(StoreTree.standardise_path(root_folder_path))])
         r = self._do_request('get', url, params={'select': 'id'})
-        r.raise_for_status()
         root_id = r.json()['id']
 
         result_tree = StoreTree(id=root_id)
@@ -323,12 +349,14 @@ class OneDrive(object):
 
 
                 r = self._do_request('post', url, json=batch)
-                r.raise_for_status()
 
                 rx_dict = r.json()
 
                 for response in rx_dict['responses']:
                     if 'body' in response:
+
+                        if 'value' not in response['body']:
+                            print(response['body'])
                         for item in response['body']['value']:
                             if 'folder' in item:
                                 result_tree.add_folder(item['id'], name=item['name'],
@@ -354,7 +382,6 @@ class OneDrive(object):
                 [self._api_drive_endpoint_prefix, 'items/{}/children'.format(parent_id)]),
             json={"name": name, "folder": {} })
 
-        r.raise_for_status()
         return r.json()['id']
 
 
@@ -368,30 +395,15 @@ class OneDrive(object):
         :return: the id of the created folder.
         """
 
-        # TODO: This is slow - would be quicker to traverse the server directories.
-        for r in self.get_root_file_tree():
-            root_folder_tree = r
-
-        current_parent_id = root_folder_tree.find_item_by_path('', is_path_to_file=False)['id']
+        current_parent_id = self._get_root_metadata()['id']
 
         path_folders = StoreTree.get_path_levels(folder_path)
 
         if path_folders[0] == '':
             return current_parent_id
 
-        current_path = ''
         for folder_name in path_folders:
-            new_parent = root_folder_tree.find_item_by_path(
-                StoreTree.concat_paths([current_path, folder_name]))
-            if new_parent is None:
-                # Need to make on the server
-                new_parent_id = self.create_folder(current_parent_id, folder_name)
-                root_folder_tree.add_folder(new_parent_id, name=folder_name, parent_id=current_parent_id)
-                current_parent_id = new_parent_id
-            else:
-                current_parent_id = new_parent['id']
-
-            current_path = StoreTree.concat_paths([current_path, folder_name])
+            current_parent_id = self.create_folder(current_parent_id, folder_name)
 
         return current_parent_id
 
@@ -406,7 +418,6 @@ class OneDrive(object):
                     [self._api_drive_endpoint_prefix, 'items/{}:/{}:/createUploadSession'.format(
                         parent_id, name)]))
 
-            r.raise_for_status()
             file_id = self._upload_file(r.json()['uploadUrl'], file_local_path)
 
             self._update_file_last_modified(file_id, modified_datetime)
@@ -418,7 +429,7 @@ class OneDrive(object):
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'items/{}:/{}:/content'.format(
                         parent_id, name)]))
-            r.raise_for_status()
+
             file_id = r.json()['id']
 
             self._update_file_last_modified(file_id, modified_datetime)
@@ -444,8 +455,6 @@ class OneDrive(object):
                 json={
                     'fileSystemInfo': {"lastModifiedDateTime": _convert_dt_to_onedrive_string(modified_datetime)}})
 
-            r.raise_for_status()
-
             self._upload_file(r.json()['uploadUrl'], file_local_path)
             self._update_file_last_modified(file_id, modified_datetime)
         else:
@@ -454,18 +463,15 @@ class OneDrive(object):
                 'put',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)]))
-            r.raise_for_status()
 
             self._update_file_last_modified(file_id, modified_datetime)
 
 
     def delete_item_by_id(self, item_id):
-        r = self._do_request('delete',
-                             http_server_utils.join_url_components(
-                                 [self._api_drive_endpoint_prefix,
-                                  'items/{}'.format(item_id)]
-                             ))
-        r.raise_for_status()
+        self._do_request('delete',
+                         http_server_utils.join_url_components(
+                             [self._api_drive_endpoint_prefix,
+                              'items/{}'.format(item_id)]))
 
     def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
         # Get the modified time and name
@@ -501,18 +507,5 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     MicrosoftServerData.set_to_microsoft_server()
     d = OneDrive('smlgit', os.getcwd(), '')
-    #d.run_token_acquisition()
 
-    id = d.create_file('6F4A41C3EA05C074!101',
-                       'testfile.txt',
-                       datetime.datetime.now(tz=datetime.timezone.utc),
-                       os.path.join(os.getcwd(), 'testfile.txt'))
-    print(id)
-
-    d.update_file(id, datetime.datetime.now(tz=datetime.timezone.utc),
-                  os.path.join(os.getcwd(), 'testfile.txt'))
-
-    # for r in d.get_root_file_tree():
-    #     res = r
-    #
-    # print(res._tree)
+    print(d.create_folder_by_path('test1/test2/test3'))

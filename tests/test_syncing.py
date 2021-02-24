@@ -265,15 +265,15 @@ class HiderClass(object):
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
 
-class TestSyncingGoogleDrive(HiderClass.TestSyncing):
-
-    def setUp(self):
-        GoogleServerData.set_to_google_server()
-        self.account_id = 'smlgit100'
-        self.config_pw = 'smlgit100_test_password'
-        self.provider_name = 'google'
-        self.drive_class = GoogleDrive
-        super(TestSyncingGoogleDrive, self).setUp()
+# class TestSyncingGoogleDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         GoogleServerData.set_to_google_server()
+#         self.account_id = 'smlgit100'
+#         self.config_pw = 'smlgit100_test_password'
+#         self.provider_name = 'google'
+#         self.drive_class = GoogleDrive
+#         super(TestSyncingGoogleDrive, self).setUp()
 
 class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
 
