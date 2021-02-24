@@ -62,13 +62,10 @@ def get_access_tokens(scope_str, client_id,
     # Returned 200
     res = r.json()
 
-    print(res)
-    print(r.content)
     if ('access_token' not in res or 'expires_in' not in res or 'scope' not in res or
                 'refresh_token' not in res):
         raise ValueError('Malformed access token data received')
 
-    print(res)
     return res
 
 

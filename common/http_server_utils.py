@@ -11,6 +11,18 @@ def find_free_port():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
 
+
+def port_in_use(port_number):
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        try:
+            s.bind(('', port_number))
+        except OSError as e:
+            if e.errno is 98:  ## address already bound
+                return True
+            raise e
+        return False
+
+
 class MyHttpServerBaseHandler(BaseHTTPRequestHandler):
     def send_success_response(self, response_content_string='',
                               extra_headers={}, code=200):
