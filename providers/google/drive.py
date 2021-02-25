@@ -642,7 +642,14 @@ class GoogleDrive(object):
                             convert_google_string_to_utc_datetime(file_meta['modifiedTime']).timestamp()))
 
     def delete_item_by_id(self, item_id):
-        r = self._do_request('delete', http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
-                                                                              'files', item_id]),
-                             error_500_retries=5)
+        self._do_request('delete',
+                         http_server_utils.join_url_components(
+                             [self._api_drive_endpoint_prefix, 'files', item_id]),
+                         error_500_retries=5)
 
+
+    def clear_trash(self):
+        self._do_request('delete',
+                         http_server_utils.join_url_components(
+                             [self._api_drive_endpoint_prefix, 'files/trash']),
+                         error_500_retries=5)

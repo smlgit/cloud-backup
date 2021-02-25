@@ -503,6 +503,10 @@ class OneDrive(object):
                             date_parser.isoparse(file_meta['fileSystemInfo']['lastModifiedDateTime']).timestamp()))
 
 
+    def clear_trash(self):
+        pass
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     MicrosoftServerData.set_to_microsoft_server()

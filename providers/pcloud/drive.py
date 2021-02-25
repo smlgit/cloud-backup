@@ -4,7 +4,6 @@ import os
 import time
 
 import requests
-from urllib import parse as urlparser
 from dateutil import parser as date_parser
 
 import providers.pcloud.auth as auth
@@ -15,6 +14,10 @@ from providers.pcloud.server_metadata import PcloudServerData
 
 
 logger = logging.getLogger(__name__)
+
+
+PCLOUD_FLAG_O_CREATE = 0x0040
+PCLOUD_FLAG_O_TRUNC = 0x0200
 
 
 def _convert_dt_to_pcloud_string(dt):
@@ -33,8 +36,41 @@ def _get_config_file_full_path(config_dir_path, account_name):
     return os.path.join(config_dir_path, _get_config_file_name(account_name))
 
 
-def _item_id_from_id_str(id_str):
+# Pcloud uses integers to id files and folders. Not sure if these are unique across
+# files and folders, but when querying metadata, an id field is returned that is
+# stated to be "unique" - this id has a 'd' prefix if a folder or a 'f' prefix if
+# a file.
+# We will use the prefix system to ensure uniqness and it makes identifying an item
+# type easier. So, generally, we use the prefix string id everywhere except direct
+# requests to Pcloud that require the integer ids.
+def _integer_id_from_str_id(id_str):
     return int(id_str.replace('d', '').replace('f', ''))
+
+
+def _str_id_from_file_integer_id(integer_id):
+    return 'f' + str(integer_id)
+
+
+def _str_id_from_folder_integer_id(integer_id):
+    return 'd' + str(integer_id)
+
+
+def _id_is_folder(str_id):
+    """
+    :param str_id: Must be a string id with 'f' or 'd' prefix.
+    :return: True if the id represents a folder, False othewise.
+    """
+    return str_id[0].lower() == 'd'
+
+
+def _get_error_code_from_pcloud_response(response_dict):
+    if isinstance(response_dict, dict) is True:
+        if 'result' in response_dict:
+            return response_dict['result']
+    else:
+        logger.warning('No result in Pcloud response: {}'.format(response_dict))
+
+    return 0
 
 
 def _pcloud_path_standardise(p):
@@ -91,7 +127,7 @@ class PcloudDrive(object):
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
                     files={}, server_error_retries=10, raise_for_status=True,
-                    session=None):
+                    ignore_codes=[], session=None):
         """
         Does a standard requests call with the passed params but also:
             1. Sets the authorization header
@@ -101,6 +137,7 @@ class PcloudDrive(object):
         :param method: one of 'get', 'post', 'put', 'delete'
         :param server_error_retries: set to the number of retries when encountering
         a pesky Server Error.
+        :param ignore_codes: A list of pcloud error codes to treat as success.
         :return: (r, rx_dict) tuple
         """
 
@@ -127,18 +164,18 @@ class PcloudDrive(object):
             headers['Authorization'] = self._get_auth_header()
             r = func(url, headers=headers, params=params, data=data, json=json, files=files)
 
-
             # Success
-            if r.status_code > 199 and r.status_code < 300:
+            if (r.status_code > 199 and r.status_code < 300 and
+                        'application/json' in r.headers['Content-Type']):
                 # Check to see if there are errors in the response
-                rx_dict = {}
-
                 try:
                     rx_dict = r.json()
                 except:
                     pass
 
-            if 'result' in rx_dict and rx_dict['result'] != 0:
+            pcloud_response_code = _get_error_code_from_pcloud_response(rx_dict)
+
+            if pcloud_response_code != 0 and pcloud_response_code not in ignore_codes:
                 logger.warning('Pcloud returned an error code {} with message: {}'.format(
                     rx_dict['result'], rx_dict['error']
                 ))
@@ -214,36 +251,95 @@ class PcloudDrive(object):
 
 
     def _get_item_metadata(self, item_id):
-        # Have to work out if a file or folder by doing this jiggery-pokery...
-        try:
-            r = requests.get(
-                http_server_utils.join_url_components(
-                    [self._api_drive_endpoint_prefix, 'stat']),
-                headers={'Authorization': self._get_auth_header()},
-                params={'fileid': item_id})
-
-            return r.json()['metadata']
-        except:
+        if _id_is_folder(item_id):
             r, rx_dict = self._do_request(
                 'get',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'listfolder']),
-                params={'folderid': item_id})
+                params={'folderid': _integer_id_from_str_id(item_id)})
+        else:
+            r, rx_dict = self._do_request(
+                'get',
+                http_server_utils.join_url_components(
+                    [self._api_drive_endpoint_prefix, 'stat']),
+                params={'fileid': _integer_id_from_str_id(item_id)})
 
-            return rx_dict['metadata']
+        return rx_dict['metadata']
 
 
     def _upload_file(self, file_local_path, parent_id, name, modified_datetime):
+        res_file_id = None
+        total_length = os.stat(file_local_path).st_size
 
-        if os.stat(file_local_path).st_size > 0:
-            with open(file_local_path, 'rb') as f:
+        if total_length > 0:
+
+            # We use the file ops interface, this allows chunking.
+
+            with requests.Session() as session:
+
+                current_pos = 0
+                chunk_size = 1048576
+
+                # Open file descriptor
                 r, rx_dict = self._do_request(
-                    'put',
+                    'get',
                     http_server_utils.join_url_components(
-                        [self._api_drive_endpoint_prefix, 'uploadfile']),
-                    params={'folderid': parent_id, 'filename': name, 'nopartial': 1,
-                            'mtime': int(modified_datetime.timestamp())},
-                    data=f)
+                        [self._api_drive_endpoint_prefix, 'file_open']),
+                    params={'flags': PCLOUD_FLAG_O_CREATE | PCLOUD_FLAG_O_TRUNC,
+                            'folderid': _integer_id_from_str_id(parent_id),
+                            'name': name},
+                    session=session)
+
+                server_fd = rx_dict['fd']
+                res_file_id = _str_id_from_file_integer_id(rx_dict['fileid'])
+
+                with open(file_local_path, 'rb') as f:
+                    while True:
+
+                        num_to_send = total_length - current_pos
+                        if num_to_send > chunk_size:
+                            num_to_send = chunk_size
+
+                        data = f.read(num_to_send)
+
+                        r, rx_dict = self._do_request(
+                            'put',
+                            http_server_utils.join_url_components(
+                                [self._api_drive_endpoint_prefix, 'file_write']),
+                            params={'fd': server_fd},
+                            data=data,
+                            server_error_retries=5,
+                            ignore_codes=[5003],
+                            session=session)
+
+                        if 'bytes' not in rx_dict:
+                            raise SystemError('No bytes were successfully written to Pcloud file.')
+
+                        current_pos += rx_dict['bytes']
+
+                        if current_pos >= total_length:
+                            break
+
+                        f.seek(current_pos)
+
+                    # Close the file descriptor
+                    self._do_request(
+                        'get',
+                        http_server_utils.join_url_components(
+                            [self._api_drive_endpoint_prefix, 'file_close']),
+                        params={'fd': server_fd},
+                        session=session)
+
+            # Now "copy" the file to itself - this is the easiest way to set
+            # the modify time...
+            if res_file_id is not None:
+                r, rx_dict = self._do_request(
+                    'get',
+                    http_server_utils.join_url_components(
+                        [self._api_drive_endpoint_prefix, 'copyfile']),
+                    params={'fileid': _integer_id_from_str_id(res_file_id),
+                            'tofolderid': _integer_id_from_str_id(parent_id),
+                            'mtime': int(modified_datetime.timestamp())})
         else:
             # Zero byte file
             # Can only get this to work using the post/multipart encoding method.
@@ -251,11 +347,14 @@ class PcloudDrive(object):
                 'post',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'uploadfile']),
-                params={'folderid': parent_id, 'filename': name, 'nopartial': 1,
+                params={'folderid': _integer_id_from_str_id(parent_id),
+                        'filename': name, 'nopartial': 1,
                         'mtime': int(modified_datetime.timestamp())},
                 files={'file': (name, '')})
 
-        return _item_id_from_id_str(rx_dict['metadata'][0]['id'])
+            res_file_id = rx_dict['metadata'][0]['id']
+
+        return res_file_id
 
 
     def get_root_file_tree(self, root_folder_path=''):
@@ -267,7 +366,7 @@ class PcloudDrive(object):
         :param root_folder_path: the path to the root folder of the desired store.
         :return: StoreTree instance.
         """
-        root_folder_id = _item_id_from_id_str(self._get_folder_path_metadata(root_folder_path)['id'])
+        root_folder_id = self._get_folder_path_metadata(root_folder_path)['id']
         result_tree = StoreTree(root_folder_id)
 
         # Recursive traverse of the root
@@ -275,7 +374,7 @@ class PcloudDrive(object):
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'listfolder']),
-            params={'folderid': root_folder_id, 'recursive': 1})
+            params={'folderid': _integer_id_from_str_id(root_folder_id), 'recursive': 1})
 
         # DFS the resultant contents lists to build tree
         stack = [rx_dict['metadata']]
@@ -285,14 +384,14 @@ class PcloudDrive(object):
 
             for item in parent_item['contents']:
                 if item['isfolder']:
-                    result_tree.add_folder(_item_id_from_id_str(item['id']),
+                    result_tree.add_folder(item['id'],
                                            name=item['name'],
-                                           parent_id=_item_id_from_id_str(parent_item['id']))
+                                           parent_id=parent_item['id'])
                     stack.append(item)
                 else:
-                    result_tree.add_file(_item_id_from_id_str(item['id']),
+                    result_tree.add_file(item['id'],
                                          name=item['name'],
-                                         parent_id=_item_id_from_id_str(parent_item['id']),
+                                         parent_id=parent_item['id'],
                                          modified_datetime=_convert_pcloud_string_to_dt(item['modified']))
 
             yield result_tree
@@ -314,7 +413,7 @@ class PcloudDrive(object):
         # Get parent id
         meta_dict = self._get_item_metadata(file_id)
 
-        parent_id = int(meta_dict['parentfolderid'])
+        parent_id = _str_id_from_folder_integer_id(meta_dict['parentfolderid'])
         name = meta_dict['name']
 
         return self._upload_file(file_local_path, parent_id, name, modified_datetime)
@@ -331,9 +430,9 @@ class PcloudDrive(object):
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'createfolderifnotexists']),
-            params={'folderid': parent_id, 'name': name})
+            params={'folderid': _integer_id_from_str_id(parent_id), 'name': name})
 
-        return _item_id_from_id_str(rx_dict['metadata']['id'])
+        return rx_dict['metadata']['id']
 
 
     def create_folder_by_path(self, folder_path):
@@ -348,7 +447,7 @@ class PcloudDrive(object):
 
         folder_path = _pcloud_path_standardise(folder_path)
 
-        current_parent_id = _item_id_from_id_str(self._get_root_metadata()['id'])
+        current_parent_id = self._get_root_metadata()['id']
 
         path_folders = StoreTree.get_path_levels(folder_path)
 
@@ -380,8 +479,8 @@ class PcloudDrive(object):
                 'get',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'file_open']),
-                params={'flags': 0, 'fileid': file_id},
-            session=session)
+                params={'flags': 0, 'fileid': _integer_id_from_str_id(file_id)},
+                session=session)
 
             fd = rx_dict['fd']
 
@@ -397,7 +496,15 @@ class PcloudDrive(object):
                         http_server_utils.join_url_components(
                             [self._api_drive_endpoint_prefix, 'file_read']),
                         params={'fd': fd, 'count': 1048576},
+                        ignore_codes=[5004],
                         session=session)
+
+                    # 5004 is server error and try and redo the whole thing (rather
+                    # than retry the same request).
+                    # Too bad.
+                    if _get_error_code_from_pcloud_response(rx_dict) == 5004:
+                        raise SystemError('Pcloud server error on file read: {}'.format(
+                            rx_dict['error']))
 
                     f.write(r.content)
                     bytes_read += len(r.content)
@@ -425,13 +532,20 @@ class PcloudDrive(object):
                 'get',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'deletefolderrecursive']),
-                params={'folderid': item_id})
+                params={'folderid': _integer_id_from_str_id(item_id)})
         else:
             self._do_request(
                 'get',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'deletefile']),
-                params={'fileid': item_id})
+                params={'fileid': _integer_id_from_str_id(item_id)})
+
+
+    def clear_trash(self):
+        self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'trash_clear']))
 
 
 if __name__ == '__main__':

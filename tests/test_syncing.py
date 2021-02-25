@@ -80,6 +80,10 @@ class HiderClass(object):
                 tree_utils.StoreTree.concat_paths([self.server_test_folder_parent_path,
                                                    self.server_test_folder_name])
 
+        def tearDown(self):
+            # Clear server store
+            self.drive_class(self.account_id, self.config_file_dir, self.config_pw).clear_trash()
+
         def _setup_test_store(self, files_definition_list):
             """
 
@@ -153,19 +157,19 @@ class HiderClass(object):
         #@unittest.SkipTest
         def testSyncBasicFileModify(self):
             file_defs = [
-                {'name': 'file_0_byte.txt', 'path': '','size': 0},
-                {'name': 'file_1_byte.txt', 'path': '', 'size': 1},
-                {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1},
-                # {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024},
-                # {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1},
-                # {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1},
-                # {'name': 'file_320k_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024},
-                # {'name': 'file_320k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024 + 1},
-                #
-                # # Empty directories
-                # {'name': 'empty_dir1', 'path': '', 'size': -1},
-                # {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
-                # {'name': 'empty_dir3', 'path': 'folder1', 'size': -1},
+                {'name': 'file_0_byte.txt', 'path': '','size': 0, 'mod_inc': 3},
+                {'name': 'file_1_byte.txt', 'path': '', 'size': 1, 'mod_inc': 1, 'mod_inc': -1},
+                {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1, 'mod_inc': -5},
+                {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024, 'mod_inc': 100},
+                {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1, 'mod_inc': -1},
+                {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1, 'mod_inc': -1},
+                {'name': 'file_320k_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024, 'mod_inc': -1},
+                {'name': 'file_320k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 320 * 1024 + 1, 'mod_inc': -1},
+
+                # Empty directories
+                {'name': 'empty_dir1', 'path': '', 'size': -1},
+                {'name': 'empty_dir2', 'path': 'folder1/folder2', 'size': -1},
+                {'name': 'empty_dir3', 'path': 'folder1', 'size': -1},
             ]
 
             # All new files
@@ -188,10 +192,10 @@ class HiderClass(object):
 
             # Modify a single file (change size) and redo (do for each file in list)
             for mod_file_def in file_defs:
-                if mod_file_def['size'] >= 0:
+                if mod_file_def['size'] >= 0 and 'mod_inc' in mod_file_def:
                     test_utils.make_random_file(os.path.join(
                         self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
-                        mod_file_def['size'] + 3, leave_existing=False)
+                        mod_file_def['size'] + mod_file_def['mod_inc'], leave_existing=False)
 
                     self._sync_drives()
                     self._download_store()
@@ -203,7 +207,7 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        @unittest.SkipTest
+        #@unittest.SkipTest
         def testDeleteItem(self):
 
             file_defs = [
@@ -267,25 +271,25 @@ class HiderClass(object):
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
 
-# class TestSyncingGoogleDrive(HiderClass.TestSyncing):
-#
-#     def setUp(self):
-#         GoogleServerData.set_to_google_server()
-#         self.account_id = 'smlgit100'
-#         self.config_pw = 'smlgit100_test_password'
-#         self.provider_name = 'google'
-#         self.drive_class = GoogleDrive
-#         super(TestSyncingGoogleDrive, self).setUp()
+class TestSyncingGoogleDrive(HiderClass.TestSyncing):
 
-# class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
-#
-#     def setUp(self):
-#         MicrosoftServerData.set_to_microsoft_server()
-#         self.account_id = 'smlgit'
-#         self.config_pw = ''
-#         self.provider_name = 'microsoft'
-#         self.drive_class = OneDrive
-#         super(TestSyncingMicrosoftDrive, self).setUp()
+    def setUp(self):
+        GoogleServerData.set_to_google_server()
+        self.account_id = 'smlgit100'
+        self.config_pw = 'smlgit100_test_password'
+        self.provider_name = 'google'
+        self.drive_class = GoogleDrive
+        super(TestSyncingGoogleDrive, self).setUp()
+
+class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+
+    def setUp(self):
+        MicrosoftServerData.set_to_microsoft_server()
+        self.account_id = 'smlgit'
+        self.config_pw = ''
+        self.provider_name = 'microsoft'
+        self.drive_class = OneDrive
+        super(TestSyncingMicrosoftDrive, self).setUp()
 
 class TestSyncingPcloudDrive(HiderClass.TestSyncing):
     def setUp(self):
