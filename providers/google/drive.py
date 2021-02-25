@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import time
+import hashlib
 
 import requests
 from dateutil import parser as date_parser
@@ -313,7 +314,7 @@ class GoogleDrive(object):
 
             params = {
                 'q': 'mimeType != \'application/vnd.google-apps.folder\' and trashed = false',
-                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime',
+                'fields': 'nextPageToken, files/id, files/name, files/parents, files/modifiedTime, files/md5Checksum',
                 'pageSize': 1000}
             if isinstance(response_dict, dict) and 'nextPageToken' in response_dict:
                 params['pageToken'] = response_dict['nextPageToken']
@@ -342,7 +343,8 @@ class GoogleDrive(object):
                         tree.add_file(rx_file['id'],
                                       rx_file['name'],
                                       parent_id=parent['id'],
-                                      modified_datetime=convert_google_string_to_utc_datetime(rx_file['modifiedTime']))
+                                      modified_datetime=convert_google_string_to_utc_datetime(rx_file['modifiedTime']),
+                                      file_hash=rx_file['md5Checksum'])
 
             yield tree
 
@@ -653,3 +655,30 @@ class GoogleDrive(object):
                          http_server_utils.join_url_components(
                              [self._api_drive_endpoint_prefix, 'files/trash']),
                          error_500_retries=5)
+
+
+    @staticmethod
+    def files_differ_on_hash(file_local_path, item_hash):
+        """
+        Will determine if the local file is different than that represented by the
+        server's hash representation.
+
+        If this provider does not support hashing, or item_hash is None, None is returned/
+        This means we can't determine yay or nay.
+
+        :param file_local_path:
+        :param item_hash: The hash as stored on the provider's server.
+        :return: True if differ, False if the same, None if can't determine.
+        """
+
+        hasher = hashlib.md5()
+
+        with open(file_local_path, 'rb') as f:
+            while True:
+                bytes = f.read(1024)
+                if len(bytes) > 0:
+                    hasher.update(bytes)
+                else:
+                    break
+
+        return hasher.hexdigest() != item_hash

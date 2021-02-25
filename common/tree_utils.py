@@ -195,7 +195,8 @@ class StoreTree(object):
 
         parent['folders'].append(new_folder)
 
-    def add_file(self, id, name, parent_id=None, modified_datetime=datetime.datetime.now()):
+    def add_file(self, id, name, parent_id=None, modified_datetime=datetime.datetime.now(),
+                 file_hash=None):
         parent = self._tree
 
         if parent_id is not None:
@@ -203,7 +204,8 @@ class StoreTree(object):
             if parent is None:
                 raise ValueError('Couldn\'t find parent with id {} in tree'.format(parent_id))
 
-        parent['files'].append({'id': id, 'name': name, 'modified': modified_datetime})
+        parent['files'].append({'id': id, 'name': name, 'modified': modified_datetime,
+                                'file_hash': file_hash})
 
     def update_folder_name(self, item_id, name):
         item = self.find_item_by_id(item_id)
@@ -261,7 +263,7 @@ class StoreTree(object):
         only access the {'folders': [{id: , 'name'}] , 'files': [{'id' , 'name': }]}
         elements.
 
-        :return: Generator. Each item is a ('folders' , 'files': , 'name': , 'id': } dict
+        :return: Generator. Each item is a ('folders' , 'files': , 'name': , 'id': ,} dict
         ('folders' only for files}.
         """
         for folder in self.get_folders():
@@ -301,7 +303,7 @@ class StoreTree(object):
     def get_items_with_parent_path(self):
         """
         :return: a generator - each result is a {'id': , 'name': , 'parent_path': , is_folder: ,}
-        dict. The 'modified' key/value pair is included for files.
+        dict. The 'modified' and 'file_hash' key/value pairs are included for files.
         Paths are the parent folder path and are relative to the tree root.
         Any directory returned is guaranteed to be returned before any of its children.
         """
@@ -327,5 +329,6 @@ class StoreTree(object):
                     stack.append((item_def, current_path))
                 else:
                     res['modified'] = item_def['modified']
+                    res['file_hash'] = item_def['file_hash']
 
                 yield res

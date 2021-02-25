@@ -507,9 +507,6 @@ class OneDrive(object):
         pass
 
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    MicrosoftServerData.set_to_microsoft_server()
-    d = OneDrive('smlgit', os.getcwd(), '')
-
-    print(d.create_folder_by_path('test1/test2/test3'))
+    @staticmethod
+    def files_differ_on_hash(file_local_path, item_hash):
+        return None

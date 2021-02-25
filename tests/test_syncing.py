@@ -158,7 +158,7 @@ class HiderClass(object):
         def testSyncBasicFileModify(self):
             file_defs = [
                 {'name': 'file_0_byte.txt', 'path': '','size': 0, 'mod_inc': 3},
-                {'name': 'file_1_byte.txt', 'path': '', 'size': 1, 'mod_inc': 1, 'mod_inc': -1},
+                {'name': 'file_1_byte.txt', 'path': '', 'size': 1, 'mod_inc': 1},
                 {'name': 'file_256k_minus 1_byte.txt', 'path': 'folder1', 'size': 256 * 1024 - 1, 'mod_inc': -5},
                 {'name': 'file_256k_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024, 'mod_inc': 100},
                 {'name': 'file_256k_plus1_byte.txt', 'path': 'folder1/folder2', 'size': 256 * 1024 + 1, 'mod_inc': -1},
@@ -181,7 +181,8 @@ class HiderClass(object):
 
             # Modify a single file (data only) and redo (do for each file in list)
             for mod_file_def in file_defs:
-                if mod_file_def['size'] >= 0:
+                # The zero file won't incure a change for data only, so ignore
+                if mod_file_def['size'] > 0:
                     test_utils.make_random_file(os.path.join(
                         self.test_local_dir, mod_file_def['path'], mod_file_def['name']),
                         mod_file_def['size'], leave_existing=False)
@@ -207,7 +208,7 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
-        #@unittest.SkipTest
+        @unittest.SkipTest
         def testDeleteItem(self):
 
             file_defs = [
@@ -281,21 +282,21 @@ class TestSyncingGoogleDrive(HiderClass.TestSyncing):
         self.drive_class = GoogleDrive
         super(TestSyncingGoogleDrive, self).setUp()
 
-class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+# class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         MicrosoftServerData.set_to_microsoft_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'microsoft'
+#         self.drive_class = OneDrive
+#         super(TestSyncingMicrosoftDrive, self).setUp()
 
-    def setUp(self):
-        MicrosoftServerData.set_to_microsoft_server()
-        self.account_id = 'smlgit'
-        self.config_pw = ''
-        self.provider_name = 'microsoft'
-        self.drive_class = OneDrive
-        super(TestSyncingMicrosoftDrive, self).setUp()
-
-class TestSyncingPcloudDrive(HiderClass.TestSyncing):
-    def setUp(self):
-        PcloudServerData.set_to_pcloud_server()
-        self.account_id = 'smlgit'
-        self.config_pw = ''
-        self.provider_name = 'pcloud'
-        self.drive_class = PcloudDrive
-        super(TestSyncingPcloudDrive, self).setUp()
+# class TestSyncingPcloudDrive(HiderClass.TestSyncing):
+#     def setUp(self):
+#         PcloudServerData.set_to_pcloud_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'pcloud'
+#         self.drive_class = PcloudDrive
+#         super(TestSyncingPcloudDrive, self).setUp()

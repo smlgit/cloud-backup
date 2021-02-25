@@ -542,29 +542,15 @@ class PcloudDrive(object):
 
 
     def clear_trash(self):
-        self._do_request(
-            'get',
-            http_server_utils.join_url_components(
-                [self._api_drive_endpoint_prefix, 'trash_clear']))
+        # Doesn't appear to work - raises a "log in required" error.
+        # self._do_request(
+        #     'get',
+        #     http_server_utils.join_url_components(
+        #         [self._api_drive_endpoint_prefix, 'trash_clear']),
+        #     params={'folderid': 0})
+        pass
 
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    PcloudServerData.set_to_pcloud_server()
-    d = PcloudDrive('smlgit', os.getcwd(), '')
-
-    # print(d.create_file(0, 'zerobyte.txt', datetime.datetime.now(tz=datetime.timezone.utc),
-    #                     os.path.join(os.getcwd(), 'zerobyte.txt')))
-    # print(d.update_file(28415559278, datetime.datetime.now(tz=datetime.timezone.utc),
-    #                     os.path.join(os.getcwd(), 'zerobyte.txt')))
-
-    # for res in d.get_root_file_tree():
-    #     t = res
-    #
-    # print(t._tree)
-
-    print(d._get_item_metadata(8561599268))
-    print(d._get_item_metadata(28411151775))
-
-    # d.download_file_by_id(28411151775, os.getcwd(), 'testdown.txt')
-    # print(d._get_file_metadata(28411151775))
+    @staticmethod
+    def files_differ_on_hash(file_local_path, item_hash):
+        return None

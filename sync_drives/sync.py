@@ -89,7 +89,8 @@ def sync_drives(path_to_local_root, path_to_config_dir,
         provider_dict['server_root_path']
     ))
 
-    cloud_drive = provider_list.get_drive_class(provider_dict['provider_name'])(
+    provider_class = provider_list.get_drive_class(provider_dict['provider_name'])
+    cloud_drive = provider_class(
         provider_dict['user_id'], path_to_config_dir, config_pw)
 
     # Build remote tree
@@ -144,7 +145,11 @@ def sync_drives(path_to_local_root, path_to_config_dir,
                 # Is on the server. If a file, check date for update
                 server_item = server_tree.find_item_by_path(str(relative_path), is_path_to_file=True)
 
-                if _files_dt_out_of_sync(local_modified_time, server_item['modified']):
+                hash_different = provider_class.files_differ_on_hash(str(item), server_item['file_hash'])
+
+                if (hash_different is True or
+                        (hash_different is None and
+                             _files_dt_out_of_sync(local_modified_time, server_item['modified']))):
                     if analyse_only is True:
                         logger.info('Would upload file {} with id {}  {}  {}'.format(
                             str(item), server_item['id'],
