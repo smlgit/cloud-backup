@@ -10,6 +10,7 @@ import providers.pcloud.auth as auth
 from common import http_server_utils
 import common.config_utils as config_utils
 from common.tree_utils import StoreTree
+import common.hash_utils as hash_utils
 from providers.pcloud.server_metadata import PcloudServerData
 
 
@@ -267,6 +268,35 @@ class PcloudDrive(object):
         return rx_dict['metadata']
 
 
+    def _verfiy_upload(self, file_local_path, file_id):
+        """
+        Checks that the sha1 of the local file matches that of the file on the server.
+        If not, the file will be deleted and an error message logged.
+
+        :param file_local_path: If None, will assume empty file.
+        :param file_id:
+        :return: True if the md5 of the local file matches that of the file on the
+        server, False otherwise.
+        """
+
+        local_sha1 = hash_utils.calc_sha1_hex_str(file_local_path)
+
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'checksumfile']),
+            params={'fileid': _integer_id_from_str_id(file_id)})
+
+        if 'sha1' not in rx_dict or rx_dict['sha1'] != local_sha1:
+            # Hashes don't match, delete the file on the server
+            self.delete_item_by_id(file_id)
+            logger.error('Checksums after upload of file {} to Pcloud didn\'t match, '
+                         'deleted the file on the server.'.format(file_local_path))
+            return False
+
+        return True
+
+
     def _upload_file(self, file_local_path, parent_id, name, modified_datetime):
         res_file_id = None
         total_length = os.stat(file_local_path).st_size
@@ -403,10 +433,11 @@ class PcloudDrive(object):
         :param file_id: The id of the file to update.
         :param modified_datetime: Modified time.
         :param file_local_path:
-        :return: True if successful.
+        :return: New file id.
         """
 
-        return self._upload_file(file_local_path, parent_id, name, modified_datetime)
+        file_id = self._upload_file(file_local_path, parent_id, name, modified_datetime)
+        self._verfiy_upload(file_local_path, file_id)
 
 
     def update_file(self, file_id, modified_datetime, file_local_path):
@@ -416,7 +447,8 @@ class PcloudDrive(object):
         parent_id = _str_id_from_folder_integer_id(meta_dict['parentfolderid'])
         name = meta_dict['name']
 
-        return self._upload_file(file_local_path, parent_id, name, modified_datetime)
+        self._upload_file(file_local_path, parent_id, name, modified_datetime)
+        self._verfiy_upload(file_local_path, file_id)
 
 
     def create_folder(self, parent_id, name):

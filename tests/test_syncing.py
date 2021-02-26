@@ -63,6 +63,8 @@ class HiderClass(object):
                     p2_item = p2.joinpath(item.relative_to(p1))
                     self.assertTrue(p2_item.exists())
                     self.assertTrue(filecmp.cmp(str(item), str(p2_item), shallow=False))
+                    print(str(item), str(p2_item))
+                    print(item.stat().st_mtime_ns, p2_item.stat().st_mtime_ns)
                     self.assertTrue(_files_timestamp_ns_equal(item.stat().st_mtime_ns, p2_item.stat().st_mtime_ns))
 
         def setUp(self):
@@ -154,7 +156,7 @@ class HiderClass(object):
                                         self.config_pw):
                 pass
 
-        #@unittest.SkipTest
+        @unittest.SkipTest
         def testSyncBasicFileModify(self):
             file_defs = [
                 {'name': 'file_0_byte.txt', 'path': '','size': 0, 'mod_inc': 3},
@@ -204,6 +206,40 @@ class HiderClass(object):
 
             # Remove all the files
             _remove_dir_contents(self.test_local_dir)
+            self._sync_drives()
+            self._download_store()
+            self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
+
+        def testChecksumCondition(self):
+            """
+            Checks that a difference in checksum causes a file upload when the dates are
+            the same.
+            """
+            file_defs = [
+                {'name': 'file_0_byte.txt', 'path': '', 'size': 0},
+                {'name': 'file_1_byte.txt', 'path': '', 'size': 1},
+                {'name': 'file_320k_minus 1_byte.txt', 'path': 'folder1', 'size': 320 * 1024 - 1, 'mod_inc': -1},
+            ]
+
+            self._setup_test_store(file_defs)
+
+            # Check if this provider supports checksum as change condition
+            drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
+            if drive.files_differ_on_hash(
+                    os.path.join(self.test_local_dir, file_defs[0]['path'], file_defs[0]['name']),
+                    'dummy_hash') is None:
+                self.skipTest('Checksum change condition not supported for this provider.')
+
+            self._sync_drives()
+
+            # Modify files
+            for file_def in file_defs:
+                file_path =\
+                    os.path.join(self.test_local_dir, file_def['path'], file_def['name'])
+                test_utils.make_random_file(
+                    file_path, file_def['size'], leave_existing=False,
+                    modify_timestamp_ns=os.stat(file_path).st_mtime_ns)
+
             self._sync_drives()
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
@@ -272,16 +308,16 @@ class HiderClass(object):
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
 
-class TestSyncingGoogleDrive(HiderClass.TestSyncing):
-
-    def setUp(self):
-        GoogleServerData.set_to_google_server()
-        self.account_id = 'smlgit100'
-        self.config_pw = 'smlgit100_test_password'
-        self.provider_name = 'google'
-        self.drive_class = GoogleDrive
-        super(TestSyncingGoogleDrive, self).setUp()
-
+# class TestSyncingGoogleDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         GoogleServerData.set_to_google_server()
+#         self.account_id = 'smlgit100'
+#         self.config_pw = 'smlgit100_test_password'
+#         self.provider_name = 'google'
+#         self.drive_class = GoogleDrive
+#         super(TestSyncingGoogleDrive, self).setUp()
+#
 # class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
 #
 #     def setUp(self):
@@ -292,11 +328,11 @@ class TestSyncingGoogleDrive(HiderClass.TestSyncing):
 #         self.drive_class = OneDrive
 #         super(TestSyncingMicrosoftDrive, self).setUp()
 
-# class TestSyncingPcloudDrive(HiderClass.TestSyncing):
-#     def setUp(self):
-#         PcloudServerData.set_to_pcloud_server()
-#         self.account_id = 'smlgit'
-#         self.config_pw = ''
-#         self.provider_name = 'pcloud'
-#         self.drive_class = PcloudDrive
-#         super(TestSyncingPcloudDrive, self).setUp()
+class TestSyncingPcloudDrive(HiderClass.TestSyncing):
+    def setUp(self):
+        PcloudServerData.set_to_pcloud_server()
+        self.account_id = 'smlgit'
+        self.config_pw = ''
+        self.provider_name = 'pcloud'
+        self.drive_class = PcloudDrive
+        super(TestSyncingPcloudDrive, self).setUp()

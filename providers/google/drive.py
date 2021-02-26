@@ -2,7 +2,6 @@ import datetime
 import logging
 import os
 import time
-import hashlib
 
 import requests
 from dateutil import parser as date_parser
@@ -11,6 +10,7 @@ import providers.google.auth as auth
 from common import http_server_utils
 import common.config_utils as config_utils
 from common.tree_utils import StoreTree
+import common.hash_utils as hash_utils
 from providers.google.server_metadata import GoogleServerData
 
 
@@ -197,7 +197,7 @@ class GoogleDrive(object):
         r = self._do_request('get',
                              http_server_utils.join_url_components(
                                  [self._api_drive_endpoint_prefix, 'files', file_id]),
-                             params={'fields': 'name, parents, modifiedTime'},
+                             params={'fields': 'name, parents, modifiedTime, md5Checksum'},
                              error_500_retries=5)
         return r.json()
 
@@ -435,6 +435,31 @@ class GoogleDrive(object):
 
         return 'timeout'
 
+    def _verfiy_upload(self, file_local_path, file_id):
+        """
+        Checks that the md5 of the local file matches that of the file on the server.
+        If not, the file will be deleted and an error message logged.
+
+        :param file_local_path: If None, will assume empty file.
+        :param file_id:
+        :return: True if the md5 of the local file matches that of the file on the
+        server, False otherwise.
+        """
+
+        if file_local_path is None:
+            local_md5 = hash_utils.empty_file_md5_hex_str
+        else:
+            local_md5 = hash_utils.calc_md5_hex_str(file_local_path)
+
+        metadata = self._get_file_metadata(file_id)
+        if local_md5 != metadata['md5Checksum']:
+            self.delete_item_by_id(file_id)
+            logger.error('Checksums after upload of file {} to Google Drive didn\'t match, '
+                         'deleted the file on the server.'.format(file_local_path))
+            return False
+
+        return True
+
     def _upload_file_data(self, session_url, file_path, previous_retry_secs=0.5):
         """
         Does a file upload after a session url has been acquired.
@@ -538,7 +563,9 @@ class GoogleDrive(object):
                              },
                              error_500_retries=5)
 
-        return r.json()['id']
+        rx_dict = r.json()
+        self._verfiy_upload(None, rx_dict['id'])
+        return rx_dict['id']
 
     def create_file(self, parent_id, name, modified_datetime, file_local_path):
         """
@@ -572,6 +599,7 @@ class GoogleDrive(object):
             res = self._upload_file_data(session_url, file_local_path,
                                          previous_retry_secs=retry_sleep)
             if isinstance(res, str) is True:
+                self._verfiy_upload(file_local_path, res)
                 return res
 
             retry_sleep = res
@@ -605,6 +633,7 @@ class GoogleDrive(object):
             res = self._upload_file_data(session_url, file_local_path,
                                          previous_retry_secs=retry_sleep)
             if isinstance(res, str):
+                self._verfiy_upload(file_local_path, res)
                 return True
 
             retry_sleep = res
@@ -671,14 +700,4 @@ class GoogleDrive(object):
         :return: True if differ, False if the same, None if can't determine.
         """
 
-        hasher = hashlib.md5()
-
-        with open(file_local_path, 'rb') as f:
-            while True:
-                bytes = f.read(1024)
-                if len(bytes) > 0:
-                    hasher.update(bytes)
-                else:
-                    break
-
-        return hasher.hexdigest() != item_hash
+        return hash_utils.calc_md5_hex_str(file_local_path) != item_hash

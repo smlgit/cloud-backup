@@ -11,6 +11,7 @@ import providers.microsoft.auth as auth
 from common import http_server_utils
 import common.config_utils as config_utils
 from common.tree_utils import StoreTree
+import common.hash_utils as hash_utils
 from providers.microsoft.server_metadata import MicrosoftServerData
 
 
@@ -246,8 +247,32 @@ class OneDrive(object):
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'items/{}'.format(item_id)]),
-            params={'select': 'id,name,fileSystemInfo'})
+            params={'select': 'id,name,fileSystemInfo,file'})
         return r.json()
+
+
+    def _verfiy_upload(self, file_local_path, file_id):
+        """
+        Checks that the sha1 of the local file matches that of the file on the server.
+        If not, the file will be deleted and an error message logged.
+
+        :param file_local_path: If None, will assume empty file.
+        :param file_id:
+        :return: True if the md5 of the local file matches that of the file on the
+        server, False otherwise.
+        """
+        local_sha1 = hash_utils.calc_sha1_hex_str(file_local_path)
+        metadata = self._get_file_metadata(file_id)
+
+        if 'sha1Hash' in metadata['file']['hashes']:
+            if metadata['file']['hashes']['sha1Hash'].lower() != local_sha1:
+                # Hashes don't match, delete the file on the server
+                self.delete_item_by_id(file_id)
+                logger.error('Checksums after upload of file {} to OneDrive didn\'t match, '
+                             'deleted the file on the server.'.format(file_local_path))
+                return False
+
+        return True
 
 
     def _upload_file(self, upload_url, file_path):
@@ -355,17 +380,21 @@ class OneDrive(object):
                 for response in rx_dict['responses']:
                     if 'body' in response:
 
-                        if 'value' not in response['body']:
-                            print(response['body'])
                         for item in response['body']['value']:
                             if 'folder' in item:
                                 result_tree.add_folder(item['id'], name=item['name'],
                                                        parent_id=item['parentReference']['id'])
                                 stack.append(item['id'])
                             else:
+                                if 'sha1Hash' in item['file']['hashes']:
+                                    h = item['file']['hashes']['sha1Hash'].lower()
+                                else:
+                                    h = None
+
                                 result_tree.add_file(item['id'], name=item['name'],
                                                      parent_id=item['parentReference']['id'],
-                                                     modified_datetime=date_parser.isoparse(item['fileSystemInfo']['lastModifiedDateTime']))
+                                                     modified_datetime=date_parser.isoparse(item['fileSystemInfo']['lastModifiedDateTime']),
+                                                     file_hash=h)
 
             yield result_tree
 
@@ -434,6 +463,8 @@ class OneDrive(object):
 
             self._update_file_last_modified(file_id, modified_datetime)
 
+
+        self._verfiy_upload(file_local_path, file_id)
         return file_id
 
 
@@ -465,6 +496,8 @@ class OneDrive(object):
                     [self._api_drive_endpoint_prefix, 'items/{}/content'.format(file_id)]))
 
             self._update_file_last_modified(file_id, modified_datetime)
+
+        self._verfiy_upload(file_local_path, file_id)
 
 
     def delete_item_by_id(self, item_id):
@@ -509,4 +542,5 @@ class OneDrive(object):
 
     @staticmethod
     def files_differ_on_hash(file_local_path, item_hash):
-        return None
+        return hash_utils.calc_sha1_hex_str(file_local_path) != item_hash
+
