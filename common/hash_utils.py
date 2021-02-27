@@ -17,9 +17,15 @@ def _calc_hash_hex_str(hasher_name, file_path):
     return hasher.hexdigest()
 
 
-def calc_md5_hex_str(file_path):
+def calc_file_md5_hex_str(file_path):
     return _calc_hash_hex_str('md5', file_path)
 
 
-def calc_sha1_hex_str(file_path):
+def calc_file_sha1_hex_str(file_path):
     return _calc_hash_hex_str('sha1', file_path)
+
+
+def calc_str_md5_hex_str(s):
+    hasher = hashlib.md5()
+    hasher.update(s)
+    return hasher.hexdigest()

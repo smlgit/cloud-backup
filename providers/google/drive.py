@@ -449,7 +449,7 @@ class GoogleDrive(object):
         if file_local_path is None:
             local_md5 = hash_utils.empty_file_md5_hex_str
         else:
-            local_md5 = hash_utils.calc_md5_hex_str(file_local_path)
+            local_md5 = hash_utils.calc_file_md5_hex_str(file_local_path)
 
         metadata = self._get_file_metadata(file_id)
         if local_md5 != metadata['md5Checksum']:
@@ -700,4 +700,4 @@ class GoogleDrive(object):
         :return: True if differ, False if the same, None if can't determine.
         """
 
-        return hash_utils.calc_md5_hex_str(file_local_path) != item_hash
+        return hash_utils.calc_file_md5_hex_str(file_local_path) != item_hash

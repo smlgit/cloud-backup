@@ -279,7 +279,7 @@ class PcloudDrive(object):
         server, False otherwise.
         """
 
-        local_sha1 = hash_utils.calc_sha1_hex_str(file_local_path)
+        local_sha1 = hash_utils.calc_file_sha1_hex_str(file_local_path)
 
         r, rx_dict = self._do_request(
             'get',

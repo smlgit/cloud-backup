@@ -261,7 +261,7 @@ class OneDrive(object):
         :return: True if the md5 of the local file matches that of the file on the
         server, False otherwise.
         """
-        local_sha1 = hash_utils.calc_sha1_hex_str(file_local_path)
+        local_sha1 = hash_utils.calc_file_sha1_hex_str(file_local_path)
         metadata = self._get_file_metadata(file_id)
 
         if 'sha1Hash' in metadata['file']['hashes']:
@@ -542,5 +542,5 @@ class OneDrive(object):
 
     @staticmethod
     def files_differ_on_hash(file_local_path, item_hash):
-        return hash_utils.calc_sha1_hex_str(file_local_path) != item_hash
+        return hash_utils.calc_file_sha1_hex_str(file_local_path) != item_hash
 
