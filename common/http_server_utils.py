@@ -5,6 +5,21 @@ from urllib import parse
 import json
 
 
+# Ugggg
+# For use when a service provider doesn't account for ephemeral port numbers
+# in redirect uris and so you have to explicitly register uris with ports.
+
+_rando_reg_ports = [51283, 58641, 60089]
+
+
+def try_get_free_port():
+    for p in _rando_reg_ports:
+        if port_in_use(p) == False:
+            return p
+
+    raise SystemError('Couldn\'t obtain a free registered port.')
+
+
 def find_free_port():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(('', 0))
@@ -17,7 +32,7 @@ def port_in_use(port_number):
         try:
             s.bind(('', port_number))
         except OSError as e:
-            if e.errno is 98:  ## address already bound
+            if e.errno == 98:  ## address already bound
                 return True
             raise e
         return False

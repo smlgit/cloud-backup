@@ -5,9 +5,7 @@ from common import http_server_utils
 from providers.pcloud.server_metadata import PcloudServerData
 
 
-# Ugggg
-# Ports registered on Pcloud
-_pcloud_reg_ports = [51283, 58641, 60089]
+
 
 class GetHandler(http_server_utils.MyHttpServerBaseHandler):
 
@@ -18,17 +16,9 @@ class GetHandler(http_server_utils.MyHttpServerBaseHandler):
         self.send_success_response()
 
 
-def _try_get_free_port():
-    for p in _pcloud_reg_ports:
-        if http_server_utils.port_in_use(p) == False:
-            return p
-
-    raise SystemError('Pcloud authorization couldn\'t find a port for redirect.')
-
-
 def get_access_token(client_id, user_browser_timeout=600, no_user_form=False):
 
-    port = _try_get_free_port()
+    port = http_server_utils.try_get_free_port()
 
     user_form_url = http_server_utils.join_url_components(
         [PcloudServerData.user_form_domain,
@@ -42,7 +32,7 @@ def get_access_token(client_id, user_browser_timeout=600, no_user_form=False):
 
     with httpd:
         if no_user_form is False:
-            print('In a browser, navigate to the following url and fill out the Google authorization form:')
+            print('In a browser, navigate to the following url and fill out the Pcloud authorization form:')
             print(user_form_url)
         else:
             # If running a local test, we need to act like the user and send the initial request
