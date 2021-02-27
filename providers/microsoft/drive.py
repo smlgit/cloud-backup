@@ -351,50 +351,51 @@ class OneDrive(object):
 
         # Have to traverse the whole thing per directory, but can use
         # batching to help a little with latency...
+        # We use a stack for returned folder ids and one for nextLink
+        # urls and service the next link urls first.
         stack = [root_id]
 
         while len(stack) > 0:
 
             batch = {}
 
-            # For each folder on the stack, build a request and put in the batch
+            # For each folder id on the stack, build a request and put in the batch
             while len(stack) > 0 and self._batch_is_full(batch) == False:
                 self._add_request_to_batch(
                     batch, 'GET',
                     '/me/drive/items/{}/children'.format(stack.pop()),
-                    params={'select': 'id,name,folder,file,parentReference,fileSystemInfo'})
+                    params={'top': 1000, 'select': 'id,name,folder,file,parentReference,fileSystemInfo'})
 
-            rx_dict = None
-            while rx_dict is None or '@odata.nextLink' in rx_dict:
-                if rx_dict is not None and '@odata.nextLink' in rx_dict:
-                    url = rx_dict['@odata.nextLink']
-                    print('=============', url)
-                else:
-                    url = self._api_drive_batch_url
+            # Do batch request
+            r = self._do_request('post',
+                                 self._api_drive_batch_url,
+                                 json=batch)
+            rx_dict = r.json()
 
+            # Maintain a list for response bodies because reach response body could have
+            # a nextLink that needs to be accessed.
+            body_list = [response['body'] for response in rx_dict['responses'] if 'body' in response ]
 
-                r = self._do_request('post', url, json=batch)
+            for body in body_list:
+                for item in body['value']:
+                    if 'folder' in item:
+                        result_tree.add_folder(item['id'], name=item['name'],
+                                               parent_id=item['parentReference']['id'])
+                        stack.append(item['id'])
+                    else:
+                        if 'sha1Hash' in item['file']['hashes']:
+                            h = item['file']['hashes']['sha1Hash'].lower()
+                        else:
+                            h = None
 
-                rx_dict = r.json()
+                        result_tree.add_file(item['id'], name=item['name'],
+                                             parent_id=item['parentReference']['id'],
+                                             modified_datetime=date_parser.isoparse(item['fileSystemInfo']['lastModifiedDateTime']),
+                                             file_hash=h)
 
-                for response in rx_dict['responses']:
-                    if 'body' in response:
-
-                        for item in response['body']['value']:
-                            if 'folder' in item:
-                                result_tree.add_folder(item['id'], name=item['name'],
-                                                       parent_id=item['parentReference']['id'])
-                                stack.append(item['id'])
-                            else:
-                                if 'sha1Hash' in item['file']['hashes']:
-                                    h = item['file']['hashes']['sha1Hash'].lower()
-                                else:
-                                    h = None
-
-                                result_tree.add_file(item['id'], name=item['name'],
-                                                     parent_id=item['parentReference']['id'],
-                                                     modified_datetime=date_parser.isoparse(item['fileSystemInfo']['lastModifiedDateTime']),
-                                                     file_hash=h)
+                if '@odata.nextLink' in body:
+                    r = self._do_request('get', body['@odata.nextLink'])
+                    body_list.append(r.json())
 
             yield result_tree
 
@@ -543,4 +544,6 @@ class OneDrive(object):
     @staticmethod
     def files_differ_on_hash(file_local_path, item_hash):
         return hash_utils.calc_file_sha1_hex_str(file_local_path) != item_hash
+
+
 
