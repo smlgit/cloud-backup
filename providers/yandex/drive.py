@@ -50,6 +50,18 @@ def _yandex_path_from_parent_id_and_name(parent_id, name):
     return parent_id.rstrip('/') + '/' + name
 
 
+def _concat_yandex_paths(p1, p2):
+    return p1.rstrip('/') + '/' + p2
+
+
+def _build_mtime_from_yandex_item(item_dict):
+    if 'custom_properties' in item_dict and 'mtime_ns' in item_dict['custom_properties']:
+        return datetime.datetime.fromtimestamp(item_dict['custom_properties']['mtime_ns'],
+                                               tz=datetime.timezone.utc)
+
+    return date_parser.isoparse(item_dict['modified'])
+
+
 class YandexDrive(object):
     def __init__(self, account_id, config_dir_path, config_pw):
         self._config = {'account_name': account_id}
@@ -94,7 +106,8 @@ class YandexDrive(object):
 
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
-                    files={}, raise_for_status=True):
+                    files={}, raise_for_status=True, error_codes_to_ignore=[],
+                    stream=False):
         """
         Does a standard requests call with the passed params but also:
             1. Sets the authorization header
@@ -127,6 +140,7 @@ class YandexDrive(object):
 
         # Success
         if (r.status_code > 199 and r.status_code < 300 and
+                    'Content-Type' in r.headers and
                     'application/json' in r.headers['Content-Type']):
             # Check to see if there are errors in the response
             try:
@@ -134,7 +148,7 @@ class YandexDrive(object):
             except:
                 pass
 
-        if raise_for_status == True:
+        if raise_for_status == True and r.status_code not in error_codes_to_ignore:
             r.raise_for_status()
 
         return r, rx_dict
@@ -276,6 +290,15 @@ class YandexDrive(object):
     #             offset = None
 
 
+    def _set_item_custom_mtime(self, item_path, modified_datetime):
+        r, rx_dict = self._do_request(
+            'patch',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'resources']),
+            params={'path': item_path},
+            json={'custom_properties': {'mtime_ns': modified_datetime.timestamp()}})
+
+
     def _get_item_metadata(self, item_path):
 
         result_dict = {}
@@ -356,7 +379,7 @@ class YandexDrive(object):
                             result_tree.add_file(item_id,
                                                  item['name'],
                                                  parent_id=parent_yandex_path,
-                                                 modified_datetime=date_parser.isoparse(item['modified']),
+                                                 modified_datetime=_build_mtime_from_yandex_item(item),
                                                  file_hash=item['md5'])
 
                     offset = rx_dict['_embedded']['offset'] + len(rx_dict['_embedded']['items'])
@@ -428,6 +451,92 @@ class YandexDrive(object):
         return result
 
 
+    def create_file(self, parent_id, name, modified_datetime, file_local_path):
+        """
+
+        :param file_id: The id of the file to update.
+        :param modified_datetime: Modified time.
+        :param file_local_path:
+        :return: New file id.
+        """
+
+        return self.update_file(_concat_yandex_paths(parent_id, name),
+                                modified_datetime,
+                                file_local_path)
+
+
+    def update_file(self, file_id, modified_datetime, file_local_path):
+
+        # Get upload url
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'resources/upload']),
+            params={'path': file_id, 'overwrite': 'true'}
+        )
+
+        while True:
+            with open(file_local_path, 'rb') as f:
+                r, rx_dict = self._do_request(rx_dict['method'].lower(), rx_dict['href'],
+                                              data=f, error_codes_to_ignore=[500, 503])
+
+                if r.status_code == 500 or r.status_code == 503:
+                    logger.warning('Yandex server error, attempting to redo upload...')
+                else:
+                    break
+
+        # Now verify the upload
+        file_meta = self._get_item_metadata(file_id)
+        if file_meta['md5'] != hash_utils.calc_file_md5_hex_str(file_local_path):
+            logger.error('Server md5 hash for file {} doesn\'t match local, deleting file on server.'.format(
+                file_local_path
+            ))
+            self.delete_item_by_id(file_id)
+            return None
+
+        # Set mod timestamp
+        self._set_item_custom_mtime(file_id, modified_datetime)
+
+        return _yandex_id_from_yandex_path(file_meta['path'])
+
+
+    def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
+
+        file_meta = self._get_item_metadata(file_id)
+
+        if output_filename is None:
+            output_filename = file_meta['name']
+
+        output_file_path = os.path.join(output_dir_path, output_filename)
+
+        # Get download url
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'resources/download']),
+            params={'path': file_id}
+        )
+
+        # Do download
+        r, rx_dict = self._do_request('get', rx_dict['href'], stream=True)
+
+        with open(output_file_path, 'wb') as fd:
+            for chunk in r.iter_content(chunk_size=128):
+                fd.write(chunk)
+
+        # Verify checksum and set modified time
+        if file_meta['md5'] == hash_utils.calc_file_md5_hex_str(output_file_path):
+            # Set modified time
+            os.utime(output_file_path,
+                     times=(datetime.datetime.now(tz=datetime.timezone.utc).timestamp(),
+                            _build_mtime_from_yandex_item(file_meta).timestamp()))
+        else:
+            logger.error('Server md5 hash for file {} doesn\'t match local, deleting file on local.'.format(
+                output_filename
+            ))
+            os.remove(output_file_path)
+
+
     def delete_item_by_id(self, item_id):
         r, rx_dict = self._do_request(
             'delete',
@@ -440,14 +549,19 @@ class YandexDrive(object):
             self._wait_for_status_complete(rx_dict['href'], rx_dict['method'])
 
 
-if __name__ == '__main__':
-    YandexServerData.set_to_yandex_server()
-    d = YandexDrive('smlgit', os.getcwd(), '')
-    for res in d.get_root_file_tree(''):
-        tree = res
+    def clear_trash(self):
+        r, rx_dict = self._do_request(
+            'delete',
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix, 'trash/resources']))
 
-    print(tree._tree)
+        if r.status_code == 202:
+            self._wait_for_status_complete(rx_dict['href'], rx_dict['method'])
 
-    d.delete_item_by_id('/folder45/folder5/folder6')
-    print(d.create_folder_by_path('/folder45/folder5/folder6'))
+
+    @staticmethod
+    def files_differ_on_hash(file_local_path, item_hash):
+        return hash_utils.calc_file_md5_hex_str(file_local_path) != item_hash
+
+
 

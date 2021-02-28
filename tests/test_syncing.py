@@ -14,6 +14,8 @@ from providers.microsoft.server_metadata import MicrosoftServerData
 from providers.microsoft.drive import OneDrive
 from providers.pcloud.drive import PcloudDrive
 from providers.pcloud.server_metadata import PcloudServerData
+from providers.yandex.drive import YandexDrive
+from providers.yandex.server_metadata import YandexServerData
 
 
 def _files_timestamp_ns_equal(ts1, ts2):
@@ -318,15 +320,15 @@ class HiderClass(object):
 #         self.drive_class = GoogleDrive
 #         super(TestSyncingGoogleDrive, self).setUp()
 #
-class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
-
-    def setUp(self):
-        MicrosoftServerData.set_to_microsoft_server()
-        self.account_id = 'smlgit'
-        self.config_pw = ''
-        self.provider_name = 'microsoft'
-        self.drive_class = OneDrive
-        super(TestSyncingMicrosoftDrive, self).setUp()
+# class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         MicrosoftServerData.set_to_microsoft_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'microsoft'
+#         self.drive_class = OneDrive
+#         super(TestSyncingMicrosoftDrive, self).setUp()
 
 # class TestSyncingPcloudDrive(HiderClass.TestSyncing):
 #     def setUp(self):
@@ -336,3 +338,13 @@ class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
 #         self.provider_name = 'pcloud'
 #         self.drive_class = PcloudDrive
 #         super(TestSyncingPcloudDrive, self).setUp()
+
+class TestSyncingYandexDrive(HiderClass.TestSyncing):
+
+    def setUp(self):
+        YandexServerData.set_to_yandex_server()
+        self.account_id = 'smlgit'
+        self.config_pw = ''
+        self.provider_name = 'yandex'
+        self.drive_class = YandexDrive
+        super(TestSyncingYandexDrive, self).setUp()
