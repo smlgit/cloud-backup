@@ -188,6 +188,62 @@ class TestStoreTree(unittest.TestCase):
         self.assertEqual(folder4_dict['id'], 4)
         self.assertEqual(folder4_dict['name'], 'folder4')
 
+    def testAddFolderPath(self):
+        tree = StoreTree(0)
+
+        # - folder1 - folder2 - file1.txt
+        # - folder3 - folder4
+
+        tree.add_folder_path([
+            {'name': 'folder1', 'id': 1},
+            {'name': 'folder2', 'id': 2}
+        ])
+
+        tree.add_file(3, 'file1.txt', 2)
+
+        tree.add_folder(4, 'folder3', 0)
+
+        tree.add_folder_path([
+            {'name': 'folder3', 'id': 4},
+            {'name': 'folder4', 'id': 5},
+        ])
+
+        #Check exception raised when adding existing folder with different id
+        with self.assertRaises(ValueError):
+            tree.add_folder_path([
+                {'name': 'folder1', 'id': 1},
+                {'name': 'folder2', 'id': 86}
+            ])
+
+        root_dict = tree.find_item_by_id(tree.root_id)
+        self.assertEqual(len(root_dict['files']), 0)
+        self.assertEqual(len(root_dict['folders']), 2)
+        self.assertEqual(root_dict['id'], 0)
+
+        folder1_dict = tree.find_item_by_id(1)
+        self.assertEqual(len(folder1_dict['files']), 0)
+        self.assertEqual(len(folder1_dict['folders']), 1)
+        self.assertEqual(folder1_dict['id'], 1)
+        self.assertEqual(folder1_dict['name'], 'folder1')
+
+        folder2_dict = tree.find_item_by_id(2)
+        self.assertEqual(len(folder2_dict['files']), 1)
+        self.assertEqual(len(folder2_dict['folders']), 0)
+        self.assertEqual(folder2_dict['id'], 2)
+        self.assertEqual(folder2_dict['name'], 'folder2')
+
+        folder3_dict = tree.find_item_by_id(4)
+        self.assertEqual(len(folder3_dict['files']), 0)
+        self.assertEqual(len(folder3_dict['folders']), 1)
+        self.assertEqual(folder3_dict['id'], 4)
+        self.assertEqual(folder3_dict['name'], 'folder3')
+
+        folder4_dict = tree.find_item_by_id(5)
+        self.assertEqual(len(folder4_dict['files']), 0)
+        self.assertEqual(len(folder4_dict['folders']), 0)
+        self.assertEqual(folder4_dict['id'], 5)
+        self.assertEqual(folder4_dict['name'], 'folder4')
+
     def testAddTree(self):
 
         # Tree 1

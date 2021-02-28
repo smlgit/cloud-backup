@@ -181,6 +181,14 @@ class StoreTree(object):
 
         parent['folders'].append(tree._tree)
 
+    def _add_folder_to_parent(self, parent_item, id, name=None):
+        new_folder = {'id': id, 'folders': [], 'files': []}
+        if name is not None:
+            new_folder['name'] = name
+
+        parent_item['folders'].append(new_folder)
+        return new_folder
+
     def add_folder(self, id, name=None, parent_id=None):
         parent = self._tree
 
@@ -189,11 +197,42 @@ class StoreTree(object):
             if parent is None:
                 raise ValueError('Couldn\'t find parent with id {} in tree'.format(parent_id))
 
-        new_folder = {'id': id, 'folders': [], 'files': []}
-        if name is not None:
-            new_folder['name'] = name
+        return self._add_folder_to_parent(parent, id, name=name)
 
-        parent['folders'].append(new_folder)
+    def add_folder_path(self, folder_dict):
+        """
+        Creates the folder path specified by the {'name' , 'id' ,} dicts in folder_dict.
+        Each element of folder dict is assumed to be a child of the previous one. The first
+        element is a child of the root.
+
+        If a folder already exists, the ids are checked for equality. If there is a conflict,
+        a ValueError exception is raised.
+
+        :param folder_dict: List of {'name' , 'id' ,}.
+        """
+        current_parent = self._tree
+
+        for folder in folder_dict:
+            new_parent = None
+
+            for existing_folder in current_parent['folders']:
+                if existing_folder['name'] == folder['name']:
+                    if existing_folder['id'] != folder['id']:
+                        raise ValueError('Attempt to add existing folder {} with id conflict - '
+                                         'existing: {} new: {}'.format(
+                        folder['name'], existing_folder['id'], folder['id']))
+                    else:
+                        new_parent = existing_folder
+                        break
+
+            if new_parent is None:
+                new_parent = self._add_folder_to_parent(current_parent,
+                                       folder['id'],
+                                       name=folder['name'])
+
+            current_parent = new_parent
+
+        return current_parent
 
     def add_file(self, id, name, parent_id=None, modified_datetime=datetime.datetime.now(),
                  file_hash=None):
