@@ -14,13 +14,23 @@ def main(args):
 
     drive_class = provider_list.get_drive_class(args.provider)
 
-    if drive_class.required_config_is_present(args.cpath, args.user):
-        print(
-            'Config file for this provider and user already exists - this will '
-            'redo authorization.')
-
     drive = drive_class(args.user, args.cpath, '')
-    drive.run_token_acquisition()
+
+    if args.op == 'init':
+        if drive_class.required_config_is_present(args.cpath, args.user):
+            print(
+                'Config file for this provider and user already exists - this will '
+                'redo authorization.')
+
+            drive.run_token_acquisition()
+    elif args.op == 'refresh' or args.op == 'revoke':
+        if drive_class.required_config_is_present(args.cpath, args.user) is False:
+            print('Config file for this provider and user doesn\'t exist. Run init first.')
+        else:
+            if args.op == 'refresh':
+                drive.refresh_token()
+            else:
+                drive.revoke_token()
 
 
 if __name__ == '__main__':
@@ -32,6 +42,9 @@ if __name__ == '__main__':
                         help='The name of the cloud drive provider.')
     parser.add_argument('user', type=str,
                         help='The account name that identifies you to the drive provider.')
+    parser.add_argument('--op', type=str, choices=['init', 'refresh', 'revoke'],
+                        default='init',
+                        help='The operation to perform. Defaults to initial authorization.')
     parser.add_argument('--cpath', type=str, default=os.getcwd(),
                         help='The full path to the directory that will store cloud-backup authentication'
                              'config files.')

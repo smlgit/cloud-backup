@@ -2,13 +2,15 @@ from providers.google.drive import GoogleDrive, GoogleServerData
 from providers.microsoft.drive import OneDrive, MicrosoftServerData
 from providers.pcloud.drive import PcloudDrive, PcloudServerData
 from providers.yandex.drive import YandexDrive, YandexServerData
+from providers.box.drive import BoxDrive, BoxServerData
 
 
 _implementations = {
     'google': {'drive': GoogleDrive},
     'microsoft': {'drive': OneDrive},
     'pcloud': {'drive': PcloudDrive},
-    'yandex': {'drive': YandexDrive}
+    'yandex': {'drive': YandexDrive},
+    'box': {'drive': BoxDrive},
 }
 
 
@@ -32,3 +34,4 @@ def init_providers():
     MicrosoftServerData.set_to_microsoft_server()
     PcloudServerData.set_to_pcloud_server()
     YandexServerData.set_to_yandex_server()
+    BoxServerData.set_to_box_server()
