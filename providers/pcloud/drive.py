@@ -201,7 +201,7 @@ class PcloudDrive(object):
             else:
                 break
 
-        if raise_for_status == True:
+        if raise_for_status == True and r.status_code not in ignore_codes:
             r.raise_for_status()
 
         return r, rx_dict
