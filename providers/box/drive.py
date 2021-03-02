@@ -2,8 +2,11 @@ import datetime
 import logging
 import os
 import time
+import json
+import base64
 
 import requests
+from requests_toolbelt import MultipartEncoder
 from dateutil import parser as date_parser
 
 import providers.box.auth as auth
@@ -15,6 +18,12 @@ from providers.box.server_metadata import BoxServerData
 
 
 logger = logging.getLogger(__name__)
+
+
+_box_max_direct_upload_file_size = 21000000
+
+
+_metadata_fields = 'id,name,type,content_modified_at,sha1'
 
 
 # Box uses integers for file and folder ids, but apparently they may not be unique
@@ -46,6 +55,15 @@ def _id_is_folder(str_id):
     return str_id[0].lower() == 'd'
 
 
+def _convert_dt_to_pcloud_string(dt):
+    # Box must see utc info. Have to assume this naive datetime represents UTC time.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+
+    # Box doesn't like better than millisecond accuracy...
+    return dt.replace(microsecond=0).isoformat()
+
+
 def _get_config_file_name(account_name):
     return account_name + '-box-cbconfig.data'
 
@@ -61,6 +79,8 @@ class BoxDrive(object):
         self._config_pw = config_pw
         self._api_drive_endpoint_prefix = http_server_utils.join_url_components(
             [BoxServerData.apis_domain, '2.0'])
+        self._api_upload_endpoint_prefix = http_server_utils.join_url_components(
+            [BoxServerData.upload_domain, 'api/2.0'])
         self._load_config(account_id)
 
     def _save_config(self):
@@ -106,12 +126,13 @@ class BoxDrive(object):
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
                     files={}, server_error_retries=10, ignore_codes=[],
-                    raise_for_status=True):
+                    raise_for_status=True, stream=False):
         """
         Does a standard requests call with the passed params but also:
             1. Sets the authorization header
             2. Will check for server errors in the response and back off if
                needed or raise an exception if appropriate.
+            3. Monitor the headers for 'retry-after' and wait accordingly.
 
         :param method: one of 'get', 'post', 'put', 'delete'
         :param server_error_retries: set to the number of retries when encountering
@@ -143,15 +164,16 @@ class BoxDrive(object):
         while True:
 
             headers['Authorization'] = self._get_auth_header()
-            r = func(url, headers=headers, params=params, data=data, json=json, files=files)
+            r = func(url, headers=headers, params=params, data=data, json=json, files=files, stream=stream)
 
             try:
                 rx_dict = r.json()
             except:
                 pass
 
-            if r.status_code == 429:
-                # Too many requests
+            # Deliberate requests for retry are code 429. Box sometimes returns 500 too,
+            # so we retry with both types.
+            if r.status_code == 429 or r.status_code == 500 or 'retry-after' in r.headers:
                 if 'retry-after' in r.headers:
                     current_sleep_time = r.headers['retry-after']
                 else:
@@ -160,11 +182,14 @@ class BoxDrive(object):
                 if retries > server_error_retries:
                     raise SystemError('Too many retries to Box')
 
+                logger.warning('Retrying after received error code {} from Box...'.format(r.status_code))
                 retries += 1
             else:
                 break
 
         if raise_for_status == True and r.status_code not in ignore_codes:
+            if r.status_code < 200 or r.status_code > 299:
+                logger.error('Box response error: {}'.format(rx_dict))
             r.raise_for_status()
 
         return r, rx_dict
@@ -252,7 +277,7 @@ class BoxDrive(object):
                     http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
                                                            'folders/{}/items'.format(parent_folder_id)]),
                     'entries',
-                params={'fields': 'id'})
+                params={'fields': 'id,name'})
 
             parent_folder_id = None
 
@@ -265,6 +290,120 @@ class BoxDrive(object):
                 return None
 
         return _str_id_from_folder_integer_id(parent_folder_id)
+
+
+    def _get_file_meta(self, file_id):
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
+                                                   'files/{}'.format(_integer_id_from_str_id(file_id))]),
+            params={'fields': _metadata_fields})
+        return rx_dict
+
+
+    def _do_direct_upload(self, file_local_path, modified_datetime, parent_id=None, file_name=None,
+                          file_id=None):
+        """
+        Either file_id must be set (file update) or parent_id AND file_name must be set (new file).
+        """
+
+        # Bog-standard requests doesn't appear to support having a dict/string second in
+        # front of the file section. So we are using requests-toolkit - this also has the
+        # benefit of streaming the upload data.
+
+        attr_dict = {'content_modified_at': _convert_dt_to_pcloud_string(modified_datetime)}
+
+        if parent_id is not None:
+            attr_dict['parent'] = {'id': str(_integer_id_from_str_id(parent_id))}
+        if file_name is not None:
+            attr_dict['name'] = file_name
+
+        with open(file_local_path, 'rb') as f:
+            m_encoder = MultipartEncoder(fields={
+                'attributes': json.dumps(attr_dict),
+                'file': (str(file_name), f)
+            })
+
+            if file_id is None:
+                url = http_server_utils.join_url_components([self._api_upload_endpoint_prefix,
+                                                             'files/content'])
+            else:
+                url = http_server_utils.join_url_components([self._api_upload_endpoint_prefix,
+                                                              'files/{}/content'.format(
+                                                                  _integer_id_from_str_id(file_id))])
+            r, rx_dict = self._do_request(
+                'post',
+                url,
+                params={'fields': 'id,sha1'},
+                data=m_encoder,
+                headers={
+                    'Content-Type': m_encoder.content_type,
+                    'content-md5': hash_utils.calc_file_sha1_hex_str(file_local_path)})
+
+        return _str_id_from_file_integer_id(rx_dict['entries'][0]['id'])
+
+
+    def _do_chunked_upload(self, file_local_path, modified_datetime, parent_id=None, file_name=None,
+                          file_id=None):
+        """
+        Either file_id must be set (file update) or parent_id AND file_name must be set (new file).
+        """
+
+        total_length = os.stat(file_local_path).st_size
+
+        json_params = {'file_size': total_length}
+
+        if file_id is not None:
+            url = http_server_utils.join_url_components([self._api_upload_endpoint_prefix,
+                                                         'files/{}/upload_sessions'.format(
+                                                             _integer_id_from_str_id(file_id)
+                                                         )])
+        else:
+            url = http_server_utils.join_url_components([self._api_upload_endpoint_prefix,
+                                                         'files/upload_sessions'])
+            json_params['folder_id'] = str(_integer_id_from_str_id(parent_id))
+            json_params['file_name'] = file_name
+
+
+        r, session_dict = self._do_request('post',url, json=json_params)
+
+        current_position = 0
+        result_parts = []
+
+        with open(file_local_path, 'rb') as f:
+            while True:
+                chunk = f.read(session_dict['part_size'])
+                sha1 = base64.b64encode(hash_utils.calc_str_sha1_bytes(chunk)).decode('ascii')
+
+                r, rx_dict = self._do_request(
+                    'put',
+                    http_server_utils.join_url_components(
+                        [self._api_upload_endpoint_prefix, 'files/upload_sessions/{}'.format(session_dict['id'])]),
+                    headers={
+                        'content-range': 'bytes {}-{}/{}'.format(
+                            current_position, current_position + len(chunk) - 1, total_length),
+                        'digest': 'sha={}'.format(sha1)},
+                    data=chunk)
+
+                result_parts.append(rx_dict['part'])
+                current_position = rx_dict['part']['offset'] + rx_dict['part']['size']
+
+                if current_position >= total_length:
+                    break
+
+        # Commit the upload
+        sha1 = base64.b64encode(hash_utils.calc_file_sha1_bytes(file_local_path)).decode('ascii')
+        r, rx_dict = self._do_request(
+            'post',
+            http_server_utils.join_url_components(
+                [self._api_upload_endpoint_prefix, 'files/upload_sessions/{}/commit'.format(session_dict['id'])]),
+            json={'parts': result_parts,
+                  'attributes': {
+                      'content_modified_at': _convert_dt_to_pcloud_string(modified_datetime)}
+                  },
+            headers={'digest': 'sha={}'.format(sha1)})
+
+        return rx_dict['entries'][0]['id']
 
 
     def get_root_file_tree(self, root_folder_path=''):
@@ -297,7 +436,7 @@ class BoxDrive(object):
                     http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
                                                            'folders/{}/items'.format(parent_folder_id)]),
                     'entries',
-                    params={'fields': 'id,name,type,content_modified_at,sha1'})
+                    params={'fields': _metadata_fields})
 
             for item in entries:
                 if item['type'] == 'folder':
@@ -356,8 +495,51 @@ class BoxDrive(object):
         return current_parent_id
 
 
+    def create_file(self, parent_id, name, modified_datetime, file_local_path):
+        if os.stat(file_local_path).st_size > _box_max_direct_upload_file_size:
+            return self._do_chunked_upload(file_local_path, modified_datetime,
+                                           parent_id=parent_id, file_name=name)
+        else:
+            return self._do_direct_upload(file_local_path, modified_datetime,
+                                          parent_id=parent_id, file_name=name)
+
+
+    def update_file(self, file_id, modified_datetime, file_local_path):
+        if os.stat(file_local_path).st_size > _box_max_direct_upload_file_size:
+            return self._do_chunked_upload(file_local_path, modified_datetime,
+                                           file_id=file_id)
+        else:
+            return self._do_direct_upload(file_local_path, modified_datetime,
+                                          file_id=file_id)
+
+
+    def download_file_by_id(self, file_id, output_dir_path, output_filename=None):
+        file_meta = self._get_file_meta(file_id)
+
+        if output_filename is None:
+            output_filename = file_meta['name']
+
+        output_file_path = os.path.join(output_dir_path, output_filename)
+
+        r, rx_dict = self._do_request(
+            'get',
+            http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
+                                                   'files/{}/content'.format(_integer_id_from_str_id(file_id))]),
+        stream=True)
+
+        with open(output_file_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=128):
+                f.write(chunk)
+
+        # Set modified time
+        os.utime(output_file_path,
+                 times=(datetime.datetime.utcnow().timestamp(),
+                        date_parser.isoparse(file_meta['content_modified_at']).timestamp()))
+
+
     def delete_item_by_id(self, item_id):
         if _id_is_folder(item_id):
+
             r, rx_dict = self._do_request(
                 'delete',
                 http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
@@ -368,16 +550,32 @@ class BoxDrive(object):
             if r.status_code == 503:
                 logger.warning('Box is taking an extended time to delete folder {}.'.format(item_id))
         else:
-            r, rx_dict = self._do_request(
+            self._do_request(
                 'delete',
                 http_server_utils.join_url_components([self._api_drive_endpoint_prefix,
                                                        'files/{}'.format(
                                                            _integer_id_from_str_id(item_id))]))
 
-if __name__ == '__main__':
-    BoxServerData.set_to_box_server()
-    d = BoxDrive('smlgit', os.getcwd(), '')
+    def clear_trash(self):
+        entries_list = self._do_paginated_get(
+            http_server_utils.join_url_components(
+                [self._api_drive_endpoint_prefix,'folders/trash/items']),
+            'entries',
+        params={'fields': _metadata_fields})
 
-    for res in d.get_root_file_tree():
-        tree = res
-    print(tree._tree)
+        for item in entries_list:
+            if item['type'] == 'folder':
+                self._do_request(
+                    'delete',
+                    http_server_utils.join_url_components(
+                        [self._api_drive_endpoint_prefix, 'folders/{}/trash'.format(item['id'])]))
+            else:
+                self._do_request(
+                    'delete',
+                    http_server_utils.join_url_components(
+                        [self._api_drive_endpoint_prefix, 'files/{}/trash'.format(item['id'])]))
+
+
+    @staticmethod
+    def files_differ_on_hash(file_local_path, item_hash):
+        return hash_utils.calc_file_sha1_hex_str(file_local_path) != item_hash

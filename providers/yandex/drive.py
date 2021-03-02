@@ -106,8 +106,7 @@ class YandexDrive(object):
 
 
     def _do_request(self, method, url, headers={}, params={}, data={}, json=None,
-                    files={}, raise_for_status=True, error_codes_to_ignore=[],
-                    stream=False):
+                    files={}, raise_for_status=True, stream=False):
         """
         Does a standard requests call with the passed params but also:
             1. Sets the authorization header
@@ -117,7 +116,6 @@ class YandexDrive(object):
         :param method: one of 'get', 'post', 'put', 'delete'
         :param server_error_retries: set to the number of retries when encountering
         a pesky Server Error.
-        :param ignore_codes: A list of pcloud error codes to treat as success.
         :return: (r, rx_dict) tuple
         """
 
@@ -133,26 +131,34 @@ class YandexDrive(object):
             func = requests.delete
 
         rx_dict = {}
+        retries = 0
+        current_wait_time = 1
+        max_retries = 5
+        yandex_retry_codes = [500, 503]
 
+        while retries < max_retries:
+            headers['Authorization'] = self._get_auth_header()
+            r = func(url, headers=headers, params=params, data=data, json=json, files=files,
+                     stream=stream)
 
-        headers['Authorization'] = self._get_auth_header()
-        r = func(url, headers=headers, params=params, data=data, json=json, files=files)
-
-        # Success
-        if (r.status_code > 199 and r.status_code < 300 and
-                    'Content-Type' in r.headers and
-                    'application/json' in r.headers['Content-Type']):
             # Check to see if there are errors in the response
             try:
                 rx_dict = r.json()
             except:
                 pass
 
-        if raise_for_status == True and r.status_code not in error_codes_to_ignore:
+            if r.status_code in yandex_retry_codes:
+                logger.warning('Yandex send response code {}, will retry...'.format(r.status_code))
+                time.sleep(current_wait_time)
+                current_wait_time *= 2
+                retries += 1
+            else:
+                break
+
+        if raise_for_status == True:
             r.raise_for_status()
 
         return r, rx_dict
-
 
 
     def _wait_for_status_complete(self, url, request_type):
@@ -212,82 +218,6 @@ class YandexDrive(object):
 
     def revoke_token(self):
         logger.warning('Revoke token not implemented for Yandex')
-
-
-    # def get_root_file_tree(self, root_folder_path=''):
-    #     """
-    #     This is a generator function. Each iteration returned will be an instance
-    #     of StoreTree - this instance will just show the progress. Just use the last
-    #     one returned for a complete tree.
-    #
-    #     :param root_folder_path: the path to the root folder of the desired store.
-    #     :return: StoreTree instance.
-    #     """
-    #
-    #     # Yandex uses paths only, so these are the ids.
-    #     # Note that 'disk:/' is the same as '/'
-    #
-    #     root_standard_path = StoreTree.standardise_path(root_folder_path)
-    #     result_tree = StoreTree(id=_convert_standard_to_yandex_path(root_standard_path))
-    #
-    #     offset = 0
-    #
-    #     while offset is not None:
-    #         # 'fields' parameter doesn't appear to work...
-    #
-    #         r, rx_dict = self._do_request(
-    #             'get',
-    #             http_server_utils.join_url_components(
-    #                 [self._api_drive_endpoint_prefix, 'resources/files']),
-    #             params={'limit': 200, 'offset': offset}
-    #             )
-    #
-    #         if 'items' in rx_dict and len(rx_dict['items']) > 0:
-    #             for item in rx_dict['items']:
-    #                 print(item['name'], item['path'], item['type'])
-    #                 item_standard_path = _convert_yandex_to_standard_path(item['path'])
-    #
-    #                 if item_standard_path.startswith(root_standard_path):
-    #                     tree_path = pathlib.Path(item_standard_path).relative_to(
-    #                         pathlib.Path(root_standard_path)
-    #                     )
-    #
-    #                     if tree_path != pathlib.Path('.'):
-    #                         # Create parent folders.
-    #                         # Ignore the root - this is already added in the tree.
-    #                         # Our id is the Yandex version of the path. Note that
-    #                         # the items come in in alphabetical order, not folder
-    #                         # heirachy order, so we need to construct the ids from
-    #                         # the standard path version...
-    #                         folder_parent_path_list = []
-    #                         for folder_path in reversed(tree_path.parents):
-    #                             if folder_path != pathlib.Path('.'):
-    #                                 folder_parent_path_list.append(
-    #                                     {'name': folder_path.name,
-    #                                      'id': _convert_standard_to_yandex_path(
-    #                                          StoreTree.standardise_path(str(folder_path)))})
-    #
-    #                         if len(folder_parent_path_list) > 0:
-    #                             parent_item = result_tree.add_folder_path(folder_parent_path_list)
-    #                         else:
-    #                             parent_item = result_tree.find_item_by_id(result_tree.root_id)
-    #
-    #                         if item['type'] == 'dir':
-    #                             result_tree.add_folder(item['path'],
-    #                                                    name=item['name'],
-    #                                                    parent_id=parent_item['id'])
-    #                         else:
-    #                             result_tree.add_file(item['path'],
-    #                                                  name=item['name'],
-    #                                                  parent_id=parent_item['id'],
-    #                                                  modified_datetime=date_parser.isoparse(item['modified']),
-    #                                                  file_hash=item['md5'])
-    #
-    #             offset = rx_dict['offset'] + len(rx_dict['items'])
-    #
-    #             yield result_tree
-    #         else:
-    #             offset = None
 
 
     def _set_item_custom_mtime(self, item_path, modified_datetime):
@@ -475,15 +405,10 @@ class YandexDrive(object):
             params={'path': file_id, 'overwrite': 'true'}
         )
 
-        while True:
-            with open(file_local_path, 'rb') as f:
-                r, rx_dict = self._do_request(rx_dict['method'].lower(), rx_dict['href'],
-                                              data=f, error_codes_to_ignore=[500, 503])
+        with open(file_local_path, 'rb') as f:
+            r, rx_dict = self._do_request(rx_dict['method'].lower(), rx_dict['href'],
+                                          data=f)
 
-                if r.status_code == 500 or r.status_code == 503:
-                    logger.warning('Yandex server error, attempting to redo upload...')
-                else:
-                    break
 
         # Now verify the upload
         file_meta = self._get_item_metadata(file_id)

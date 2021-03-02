@@ -16,6 +16,8 @@ from providers.pcloud.drive import PcloudDrive
 from providers.pcloud.server_metadata import PcloudServerData
 from providers.yandex.drive import YandexDrive
 from providers.yandex.server_metadata import YandexServerData
+from providers.box.drive import BoxDrive
+from providers.box.server_metadata import BoxServerData
 
 
 def _files_timestamp_ns_equal(ts1, ts2):
@@ -339,12 +341,22 @@ class HiderClass(object):
 #         self.drive_class = PcloudDrive
 #         super(TestSyncingPcloudDrive, self).setUp()
 
-class TestSyncingYandexDrive(HiderClass.TestSyncing):
+# class TestSyncingYandexDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         YandexServerData.set_to_yandex_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'yandex'
+#         self.drive_class = YandexDrive
+#         super(TestSyncingYandexDrive, self).setUp()
+
+class TestSyncingBoxDrive(HiderClass.TestSyncing):
 
     def setUp(self):
-        YandexServerData.set_to_yandex_server()
+        BoxServerData.set_to_box_server()
         self.account_id = 'smlgit'
         self.config_pw = ''
-        self.provider_name = 'yandex'
-        self.drive_class = YandexDrive
-        super(TestSyncingYandexDrive, self).setUp()
+        self.provider_name = 'box'
+        self.drive_class = BoxDrive
+        super(TestSyncingBoxDrive, self).setUp()

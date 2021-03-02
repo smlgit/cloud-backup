@@ -3,7 +3,7 @@ import datetime
 
 
 # Global that you can modify to conditionally run slow tests.
-run_slow_tests = False
+run_slow_tests = True
 
 
 def make_random_file(full_path, num_bytes, leave_existing=False,
