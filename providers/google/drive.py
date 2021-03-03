@@ -12,6 +12,7 @@ import common.config_utils as config_utils
 from common.tree_utils import StoreTree
 import common.hash_utils as hash_utils
 from providers.google.server_metadata import GoogleServerData
+from providers.google.utils import process_google_response_for_errors
 
 
 logger = logging.getLogger(__name__)
@@ -136,15 +137,17 @@ class GoogleDrive(object):
         while retries <= error_500_retries:
             headers['Authorization'] = self._get_auth_header()
             r = func(url, headers=headers, params=params, data=data, json=json)
-            if r.status_code != 500:
+            if process_google_response_for_errors(r, logger) is False:
                 break
 
-            logger.warning('Received an HTTP 500 error from the Google server...')
+            logger.warning('Received an HTTP {} error from the Google server...'.format(
+                r.status_code
+            ))
             time.sleep(current_sleep_time)
             retries += 1
             current_sleep_time *= 2
 
-        if raise_for_status == True:
+        if raise_for_status is True:
             r.raise_for_status()
 
         return r
@@ -701,3 +704,9 @@ class GoogleDrive(object):
         """
 
         return hash_utils.calc_file_md5_hex_str(file_local_path) != item_hash
+
+
+if __name__ == '__main__':
+    GoogleServerData.set_to_google_server()
+    d = GoogleDrive('smlgit100', os.getcwd(), '')
+    d.refresh_token()

@@ -1,3 +1,4 @@
+import logging
 import urllib.parse as parse
 from http.server import HTTPServer
 
@@ -5,6 +6,10 @@ import requests
 
 from common import http_server_utils
 from providers.google.server_metadata import GoogleServerData
+from providers.google.utils import process_google_response_for_errors
+
+
+logger = logging.getLogger(__name__)
 
 
 class GetHandler(http_server_utils.MyHttpServerBaseHandler):
@@ -54,16 +59,16 @@ def get_access_tokens(scope_str, client_id, client_secret,
             'grant_type': 'authorization_code'}
 
     r = requests.post(GoogleServerData.access_token_domain + '/token', data=data)
-    r.raise_for_status()
+    process_google_response_for_errors(r, logger)
+
+    res = r.json()
 
     # Returned 200
-    res = r.json()
 
     if ('access_token' not in res or 'expires_in' not in res or 'scope' not in res or
                 'refresh_token' not in res):
         raise ValueError('Malformed access token data received')
 
-    print(res)
     return res
 
 
@@ -74,10 +79,11 @@ def refresh_token(client_id, client_secret, ref_token):
             'grant_type': 'refresh_token'}
 
     r = requests.post(GoogleServerData.access_token_domain + '/token', data=data)
-    r.raise_for_status()
+    process_google_response_for_errors(r, logger)
+
+    res = r.json()
 
     # Returned 200
-    res = r.json()
 
     if 'access_token' not in res or 'expires_in' not in res or 'scope' not in res:
         raise ValueError('Malformed access token data received')
@@ -91,4 +97,4 @@ def revoke_token(token):
 
     r = requests.post(GoogleServerData.access_token_domain + '/revoke',
                       params=params, headers=headers)
-    r.raise_for_status()
+    process_google_response_for_errors(r, logger)

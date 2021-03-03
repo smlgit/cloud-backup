@@ -312,15 +312,15 @@ class HiderClass(object):
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
 
-# class TestSyncingGoogleDrive(HiderClass.TestSyncing):
-#
-#     def setUp(self):
-#         GoogleServerData.set_to_google_server()
-#         self.account_id = 'smlgit100'
-#         self.config_pw = 'smlgit100_test_password'
-#         self.provider_name = 'google'
-#         self.drive_class = GoogleDrive
-#         super(TestSyncingGoogleDrive, self).setUp()
+class TestSyncingGoogleDrive(HiderClass.TestSyncing):
+
+    def setUp(self):
+        GoogleServerData.set_to_google_server()
+        self.account_id = 'smlgit100'
+        self.config_pw = 'smlgit100_test_password'
+        self.provider_name = 'google'
+        self.drive_class = GoogleDrive
+        super(TestSyncingGoogleDrive, self).setUp()
 #
 # class TestSyncingMicrosoftDrive(HiderClass.TestSyncing):
 #
@@ -331,7 +331,7 @@ class HiderClass(object):
 #         self.provider_name = 'microsoft'
 #         self.drive_class = OneDrive
 #         super(TestSyncingMicrosoftDrive, self).setUp()
-
+#
 # class TestSyncingPcloudDrive(HiderClass.TestSyncing):
 #     def setUp(self):
 #         PcloudServerData.set_to_pcloud_server()
@@ -340,7 +340,7 @@ class HiderClass(object):
 #         self.provider_name = 'pcloud'
 #         self.drive_class = PcloudDrive
 #         super(TestSyncingPcloudDrive, self).setUp()
-
+#
 # class TestSyncingYandexDrive(HiderClass.TestSyncing):
 #
 #     def setUp(self):
@@ -350,13 +350,13 @@ class HiderClass(object):
 #         self.provider_name = 'yandex'
 #         self.drive_class = YandexDrive
 #         super(TestSyncingYandexDrive, self).setUp()
-
-class TestSyncingBoxDrive(HiderClass.TestSyncing):
-
-    def setUp(self):
-        BoxServerData.set_to_box_server()
-        self.account_id = 'smlgit'
-        self.config_pw = ''
-        self.provider_name = 'box'
-        self.drive_class = BoxDrive
-        super(TestSyncingBoxDrive, self).setUp()
+#
+# class TestSyncingBoxDrive(HiderClass.TestSyncing):
+#
+#     def setUp(self):
+#         BoxServerData.set_to_box_server()
+#         self.account_id = 'smlgit'
+#         self.config_pw = ''
+#         self.provider_name = 'box'
+#         self.drive_class = BoxDrive
+#         super(TestSyncingBoxDrive, self).setUp()
