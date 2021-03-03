@@ -705,9 +705,3 @@ class GoogleDrive(object):
         """
 
         return hash_utils.calc_file_md5_hex_str(file_local_path) != item_hash
-
-
-if __name__ == '__main__':
-    GoogleServerData.set_to_google_server()
-    d = GoogleDrive('smlgit100', os.getcwd(), '')
-    d.refresh_token()
