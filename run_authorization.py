@@ -22,7 +22,7 @@ def main(args):
                 'Config file for this provider and user already exists - this will '
                 'redo authorization.')
 
-            drive.run_token_acquisition()
+        drive.run_token_acquisition()
     elif args.op == 'refresh' or args.op == 'revoke':
         if drive_class.required_config_is_present(args.cpath, args.user) is False:
             print('Config file for this provider and user doesn\'t exist. Run init first.')
