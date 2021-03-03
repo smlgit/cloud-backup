@@ -97,6 +97,15 @@ def sync_drives(path_to_local_root, path_to_config_dir,
     for res in cloud_drive.get_root_file_tree(root_folder_path=provider_dict['server_root_path']):
         server_tree = res
 
+    # We'll build a list of dicts that specify required changes so we can report progess:
+    #    {'name': , 'type': <dir or file>,
+    #     'op': <'c', 'u', 'd'>,
+    #     'id': ,
+    #     'parent_path': ,
+    #     'local_path': ,
+    #     'mtime': }
+    operations = []
+
     # Now cycle through the local store root and do the following:
     #    1. for each folder, check the local contents are present on the server and
     #       if not, or if the file modified date is older on the server, upload to the server.
@@ -124,23 +133,17 @@ def sync_drives(path_to_local_root, path_to_config_dir,
 
             if server_item is None:
                 # Not on server, add it
+                operation = {'name': item.name, 'op': 'c',
+                             'parent_path': str(parent_relative_path),
+                             'mtime': local_modified_time}
 
-                if analyse_only is True:
-                    logger.info('Would create item {}'.format(str(item)))
-                else:
-                    parent_id = server_tree.find_item_by_path(
-                        str(parent_relative_path), is_path_to_file=False)['id']
+                if item.is_dir() is True:
+                    operation['type'] = 'dir'
+                elif item.is_file() is True:
+                    operation['type'] = 'file'
+                    operation['local_path'] = str(item)
 
-                    if item.is_dir() is True:
-                        logger.info('Creating folder {}'.format(str(item)))
-                        new_id = cloud_drive.create_folder(parent_id, item.name)
-                        server_tree.add_folder(new_id, name=item.name, parent_id=parent_id)
-                    elif item.is_file() is True:
-                        logger.info('Creating file {}'.format(str(item)))
-                        new_id = cloud_drive.create_file(parent_id, item.name, local_modified_time,
-                                                         str(item))
-                        server_tree.add_file(new_id, item.name, parent_id=parent_id,
-                                             modified_datetime=local_modified_time)
+                operations.append(operation)
             elif item.is_file():
                 # Is on the server. If a file, check date for update
                 server_item = server_tree.find_item_by_path(str(relative_path), is_path_to_file=True)
@@ -150,17 +153,13 @@ def sync_drives(path_to_local_root, path_to_config_dir,
                 if (hash_different is True or
                         (hash_different is None and
                              _files_dt_out_of_sync(local_modified_time, server_item['modified']))):
-                    if analyse_only is True:
-                        logger.info('Would upload file {} with id {}  {}  {}'.format(
-                            str(item), server_item['id'],
-                            local_modified_time, server_item['modified']
-                        ))
-                    else:
-                        logger.info('Uploading file {} with id {}'.format(
-                            str(item), server_item['id']
-                        ))
-                        cloud_drive.update_file(server_item['id'], local_modified_time,
-                                                str(item))
+                    operations.append({
+                        'id': server_item['id'],
+                        'type': 'file',
+                        'name': item.name,
+                        'op': 'u',
+                        'local_path': str(item),
+                        'mtime': local_modified_time})
 
         # For each folder on the local store (starting from the root itself),
         # check if there are any files or folders on the server tree that don't
@@ -184,17 +183,58 @@ def sync_drives(path_to_local_root, path_to_config_dir,
 
                     if exists_on_local is False:
                         # Can it on the server
-
-                        if analyse_only is True:
-                            logger.info('Would delete item {} with id {} from server'.format(
-                                server_child['name'], server_child['id']
-                            ))
-                        else:
-                            logger.info('Deleting item {} with id {} from server'.format(
-                                server_child['name'], server_child['id']
-                            ))
-                            cloud_drive.delete_item_by_id(server_child['id'])
-                            server_tree.remove_item(server_child['id'])
+                        operations.append({'id': server_child['id'], 'op': 'd',
+                                           'name': server_child['name']})
 
         yield None
+
+    # Now apply the changes
+    logger.info('Will carry out {} operations for sync...'.format(len(operations)))
+
+    for i in range(0, len(operations)):
+
+        operation = operations[i]
+
+        if operation['op'] == 'c':
+
+            logger.info('{} {} {} in {} (operation {}/{})'.format(
+                'Would create' if analyse_only is True else 'Creating',
+                operation['type'], operation['name'],
+                operation['parent_path'], i + 1, len(operations)))
+
+            if analyse_only is False:
+                parent_id = server_tree.find_item_by_path(
+                    operation['parent_path'], is_path_to_file=False)['id']
+
+                if operation['type'] == 'dir':
+                    new_id = cloud_drive.create_folder(parent_id, operation['name'])
+                    server_tree.add_folder(new_id, name=operation['name'], parent_id=parent_id)
+                else:
+                    cloud_drive.create_file(parent_id, operation['name'],
+                                            operation['mtime'], operation['local_path'])
+        elif operation['op'] == 'u':
+
+            logger.info('{} file {} with id {} (operation {}/{})'.format(
+                'Would upload' if analyse_only is True else 'Uploading',
+                operation['name'], operation['id'],
+                i + 1, len(operations)
+            ))
+
+            if analyse_only is False:
+                cloud_drive.update_file(operation['id'], operation['mtime'],
+                                        operation['local_path'])
+        elif operation['op'] == 'd':
+
+            logger.info('{} file {} with id {} (operation {}/{})'.format(
+                'Would delete' if analyse_only is True else 'Deleting',
+                operation['name'], operation['id'],
+                i + 1, len(operations)
+            ))
+
+            if analyse_only is False:
+                cloud_drive.delete_item_by_id(operation['id'])
+                server_tree.remove_item(operation['id'])
+
+        yield None
+
 

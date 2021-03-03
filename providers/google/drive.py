@@ -111,7 +111,7 @@ class GoogleDrive(object):
 
         :param method: one of 'get', 'post', 'put', 'delete'
         :param error_500_retries: set to the number of retries when encountering
-        Google's pesky 500 Server Error: Internal Server Error error.
+        Google's pesky 5XX Server Errors.
         :return: whatever is returned from a requests call
         """
 
@@ -137,7 +137,8 @@ class GoogleDrive(object):
         while retries <= error_500_retries:
             headers['Authorization'] = self._get_auth_header()
             r = func(url, headers=headers, params=params, data=data, json=json)
-            if process_google_response_for_errors(r, logger) is False:
+            if process_google_response_for_errors(r, logger,
+                                                  raise_for_status=raise_for_status) is False:
                 break
 
             logger.warning('Received an HTTP {} error from the Google server...'.format(

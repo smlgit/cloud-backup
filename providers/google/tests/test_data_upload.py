@@ -7,9 +7,11 @@ from http.server import HTTPServer
 from threading import Thread
 import filecmp
 import time
+from urllib import parse
 
 import common.test_utils as test_utils
 import common.http_server_utils as http_server_utils
+from common.hash_utils import calc_file_md5_hex_str
 from providers.google.tests.test_common import GoogleTestBaseHandler
 from providers.google.drive import GoogleDrive
 from providers.google.server_metadata import GoogleServerData
@@ -39,6 +41,8 @@ class CreateFileHandler(GoogleTestBaseHandler):
     # the local to restart the upload.
     do_restart_error_at_byte_number = -1
 
+    # Metadata for the "uploaded" file.
+    metadata_dict = {}
 
     # State vars
     written_bytes = 0
@@ -51,6 +55,13 @@ class CreateFileHandler(GoogleTestBaseHandler):
         setattr(CreateFileHandler, 'ignore_write_done', False)
         setattr(CreateFileHandler, 'interrupt_error_done', False)
         setattr(CreateFileHandler, 'restart_error_done', False)
+
+    def do_GET(self):
+        url_data = parse.urlparse(self.path)
+
+        if '/files/' in url_data.path:
+            # Request for metadata, respond with json metadata
+            self.send_success_response(response_content_string=json.dumps(CreateFileHandler.metadata_dict))
 
     def do_POST(self):
         if self.testing_handle_google_token_refresh() is True:
@@ -158,6 +169,13 @@ class TestDataUpload(unittest.TestCase):
 
         Thread(target=_cloud_server_thread, args=(self.cloud_server,), daemon=True).start()
 
+    def _set_create_file_handler_metadata(self, file_path):
+        # Don't do much here - this is just to make the _get_file_metadata function work.
+        CreateFileHandler.metadata_dict = {
+            'name': os.path.basename(file_path),
+            'md5Checksum': calc_file_md5_hex_str(file_path)
+        }
+
     def setUp(self):
         self.cloud_server = None
         self.test_data_root = os.path.join(os.getcwd(), 'cbackup_test')
@@ -194,6 +212,7 @@ class TestDataUpload(unittest.TestCase):
     def testCreateFileNormal(self):
         self._start_cloud_server(CreateFileHandler)
 
+        self._set_create_file_handler_metadata(self.file256k_minus1_path)
         drive = GoogleDrive('local_test_acc', self.test_data_root, '')
         drive.create_file('defaultid', 'file256k_minus1.txt',
                           modified_datetime=datetime.datetime.now(),
@@ -201,21 +220,25 @@ class TestDataUpload(unittest.TestCase):
 
         time.sleep(2)
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_path)
         drive.create_file('defaultid', 'file256k.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_plus1_path)
         drive.create_file('defaultid', 'file256k_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_plus1_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file5M_path)
         drive.create_file('defaultid', 'file5M.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file5M_plus1_path)
         drive.create_file('defaultid', 'file5M_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_plus1_path)
@@ -243,16 +266,19 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.ignore_write_request_at_byte_number = 200000
 
         drive = GoogleDrive('local_test_acc', self.test_data_root, '')
+        self._set_create_file_handler_metadata(self.file256k_minus1_path)
         drive.create_file('defaultid', 'file256k_minus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_minus1_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_path)
         drive.create_file('defaultid', 'file256k.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_plus1_path)
         drive.create_file('defaultid', 'file256k_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_plus1_path)
@@ -260,11 +286,13 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.init_for_new_upload()
         CreateFileHandler.ignore_write_request_at_byte_number = 1000000
 
+        self._set_create_file_handler_metadata(self.file5M_path)
         drive.create_file('defaultid', 'file5M.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file5M_plus1_path)
         drive.create_file('defaultid', 'file5M_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_plus1_path)
@@ -292,16 +320,19 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.do_restart_error_at_byte_number = 200000
 
         drive = GoogleDrive('local_test_acc', self.test_data_root, '')
+        self._set_create_file_handler_metadata(self.file256k_minus1_path)
         drive.create_file('defaultid', 'file256k_minus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_minus1_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_path)
         drive.create_file('defaultid', 'file256k.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_plus1_path)
         drive.create_file('defaultid', 'file256k_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_plus1_path)
@@ -309,11 +340,13 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.init_for_new_upload()
         CreateFileHandler.do_restart_error_at_byte_number = 3000000
 
+        self._set_create_file_handler_metadata(self.file5M_path)
         drive.create_file('defaultid', 'file5M.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file5M_plus1_path)
         drive.create_file('defaultid', 'file5M_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_plus1_path)
@@ -341,16 +374,19 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.do_interrupt_error_at_byte_number = 200000
 
         drive = GoogleDrive('local_test_acc', self.test_data_root, '')
+        self._set_create_file_handler_metadata(self.file256k_minus1_path)
         drive.create_file('defaultid', 'file256k_minus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_minus1_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_path)
         drive.create_file('defaultid', 'file256k.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file256k_plus1_path)
         drive.create_file('defaultid', 'file256k_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file256k_plus1_path)
@@ -358,11 +394,13 @@ class TestDataUpload(unittest.TestCase):
         CreateFileHandler.init_for_new_upload()
         CreateFileHandler.do_interrupt_error_at_byte_number = 3000000
 
+        self._set_create_file_handler_metadata(self.file5M_path)
         drive.create_file('defaultid', 'file5M.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_path)
 
         CreateFileHandler.init_for_new_upload()
+        self._set_create_file_handler_metadata(self.file5M_plus1_path)
         drive.create_file('defaultid', 'file5M_plus1.txt',
                           modified_datetime=datetime.datetime.now(),
                           file_local_path=self.file5M_plus1_path)
