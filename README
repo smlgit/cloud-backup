@@ -5,8 +5,8 @@ These scripts allow you to easily back up your local files to mulitple cloud ser
 run_authorization.py carries out OAuth access token acquisition of the user's cloud drive.
 run_backup.py compares a local directory with a directory on the user's cloud drive and makes changes on the cloud drive to sync with the local.
 
-These scripts have only been tested using Python 3.9.
+These scripts have only been tested using Python 3.9. requirements.txt shows which extra packages are required.
 
 Look at the providers directory to see which cloud storage services are currently supported.
 
-Note that the "app" isn't verified for Google Drive and they require unverfied apps to explicitly register user accounts. If you want to use Google Drive with these scripts, register your own "app" in your https://console.developers.google.com page.
+Note that the "app" isn't verified for Google Drive and they require unverfied apps to explicitly register user accounts. If you want to use Google Drive with these scripts, register your own "app" in your https://console.developers.google.com page and modify the client_id and client_secret fields in providers.google.server_metadata.py.
