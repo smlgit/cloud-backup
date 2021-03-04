@@ -241,7 +241,14 @@ class YandexDrive(object):
                 'get',
                 http_server_utils.join_url_components(
                     [self._api_drive_endpoint_prefix, 'resources']),
-                params={'path': item_path, 'limit': 200, 'offset': offset})
+                params={'path': item_path, 'limit': 200, 'offset': offset},
+            raise_for_status=False)
+
+            if r.status_code == 404:
+                # Item doesn't exist
+                return None
+
+            r.raise_for_status()
 
             if 'path' not in result_dict:
                 # First response
@@ -272,49 +279,42 @@ class YandexDrive(object):
         # Yandex uses paths only, so these are the ids.
 
         root_standard_path = StoreTree.standardise_path(root_folder_path)
-        result_tree = StoreTree(id=_convert_standard_to_yandex_path(root_standard_path))
+        yandex_root_path = _convert_standard_to_yandex_path(root_standard_path)
+
+        # Check the root path exists
+        if self._get_item_metadata(yandex_root_path) is None:
+            raise ValueError('Couldn\'t find folder with path {}'.format(root_standard_path))
+
+        result_tree = StoreTree(id=yandex_root_path)
 
         # Yandex's resources/files request returns all files, but not directories.
         # This means we will miss empty directories...
         # So we have to traverse each directory individually using the resources
         # request. Slow.
 
-        stack = [_convert_standard_to_yandex_path(root_standard_path)]
+        stack = [yandex_root_path]
 
         while len(stack) > 0:
             parent_yandex_path = stack.pop()
+            parent_meta = self._get_item_metadata(parent_yandex_path)
 
-            offset = 0
-            while offset is not None:
-                # 'fields' parameter doesn't appear to work...
+            if '_embedded' in parent_meta and len(parent_meta['_embedded']['items']) > 0:
 
-                r, rx_dict = self._do_request(
-                    'get',
-                    http_server_utils.join_url_components(
-                        [self._api_drive_endpoint_prefix, 'resources']),
-                    params={'path': parent_yandex_path, 'limit': 200, 'offset': offset})
+                # Add new dirs and files to parent
+                for item in parent_meta['_embedded']['items']:
+                    item_id = _yandex_id_from_yandex_path(item['path'])
 
-                if '_embedded' in rx_dict and len(rx_dict['_embedded']['items']) > 0:
-
-                    # Add new dirs and files to parent
-                    for item in rx_dict['_embedded']['items']:
-                        item_id = _yandex_id_from_yandex_path(item['path'])
-
-                        if item['type'] == 'dir':
-                            result_tree.add_folder(item_id,
-                                                   name=item['name'],
-                                                   parent_id=parent_yandex_path)
-                            stack.append(item_id)
-                        else:
-                            result_tree.add_file(item_id,
-                                                 item['name'],
-                                                 parent_id=parent_yandex_path,
-                                                 modified_datetime=_build_mtime_from_yandex_item(item),
-                                                 file_hash=item['md5'])
-
-                    offset = rx_dict['_embedded']['offset'] + len(rx_dict['_embedded']['items'])
-                else:
-                    offset = None
+                    if item['type'] == 'dir':
+                        result_tree.add_folder(item_id,
+                                               name=item['name'],
+                                               parent_id=parent_yandex_path)
+                        stack.append(item_id)
+                    else:
+                        result_tree.add_file(item_id,
+                                             item['name'],
+                                             parent_id=parent_yandex_path,
+                                             modified_datetime=_build_mtime_from_yandex_item(item),
+                                             file_hash=item['md5'])
 
             yield result_tree
 

@@ -344,7 +344,15 @@ class OneDrive(object):
             url = http_server_utils.join_url_components(
                                  [self._api_drive_endpoint_prefix,
                                   'root:/{}'.format(StoreTree.standardise_path(root_folder_path))])
-        r = self._do_request('get', url, params={'select': 'id'})
+
+        r = self._do_request('get', url, params={'select': 'id'}, raise_for_status=False)
+
+        if r.status_code == 404:
+            error_dict = r.json()
+            if error_dict['error']['code'] == 'itemNotFound':
+                raise ValueError('Couldn\'t find folder with path {}'.format(root_folder_path))
+
+        r.raise_for_status()
         root_id = r.json()['id']
 
         result_tree = StoreTree(id=root_id)

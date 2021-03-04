@@ -21,6 +21,9 @@ PCLOUD_FLAG_O_CREATE = 0x0040
 PCLOUD_FLAG_O_TRUNC = 0x0200
 
 
+PCLOUD_ERROR_NOT_EXIST = 2005
+
+
 def _convert_dt_to_pcloud_string(dt):
     return dt.isoformat().split('+')[0]
 
@@ -246,7 +249,11 @@ class PcloudDrive(object):
             'get',
             http_server_utils.join_url_components(
                 [self._api_drive_endpoint_prefix, 'listfolder']),
-            params={'path': folder_path})
+            params={'path': folder_path},
+        ignore_codes=[PCLOUD_ERROR_NOT_EXIST])
+
+        if rx_dict['result'] == PCLOUD_ERROR_NOT_EXIST:
+            raise ValueError('Couldn\'t find folder with path {}'.format(folder_path))
 
         return rx_dict['metadata']
 

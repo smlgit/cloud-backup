@@ -418,7 +418,7 @@ class BoxDrive(object):
 
         root_folder_id = self._get_folder_id_from_path(root_folder_path)
 
-        if root_folder_path is None:
+        if root_folder_id is None:
             raise ValueError('Root {} doesn\'t appear to exist.'.format(root_folder_path))
 
 

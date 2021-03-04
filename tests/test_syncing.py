@@ -214,6 +214,32 @@ class HiderClass(object):
             self._download_store()
             self.assertDirectoriesAreEqual(self.test_local_dir, self.test_download_dir)
 
+        def testNonExistentRootPath(self):
+            """
+            Checks appropriate exception is raised when user tries to get a tree rooted
+            by a path that doesn't exist.
+            """
+
+            file_defs = [
+                {'name': 'file_1_byte.txt', 'path': '', 'size': 1, 'mod_inc': 1},
+
+                # Empty directories
+                {'name': 'empty_dir1', 'path': '', 'size': -1},
+                {'name': 'empty_dir2', 'path': 'empty_dir1', 'size': -1},
+                {'name': 'empty_dir3', 'path': 'empty_dir1/empty_dir2', 'size': -1},
+            ]
+
+            # All new files
+            self._setup_test_store(file_defs)
+            self._sync_drives()
+
+            drive = self.drive_class(self.account_id, self.config_file_dir, self.config_pw)
+
+            with self.assertRaises(ValueError):
+                for res in drive.get_root_file_tree('empty_dir1/empty_dir45'):
+                    pass
+
+        #@unittest.SkipTest
         def testChecksumCondition(self):
             """
             Checks that a difference in checksum causes a file upload when the dates are
