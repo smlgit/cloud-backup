@@ -1,1 +1,12 @@
 Some scripts to backup data to multiple cloud storage providers.
+
+These scripts allow you to easily back up your local files to mulitple cloud services without using their apps or code. This code doesn't use any SDKs and the only non-core Python packages used are requests and dateutil. If you use something like gocryptfs, you can dump all your files to cloud providers easily without them seeing your data or coming near your device.
+
+run_authorization.py carries out OAuth access token acquisition of the user's cloud drive.
+run_backup.py compares a local directory with a directory on the user's cloud drive and makes changes on the cloud drive to sync with the local.
+
+These scripts have only been tested using Python 3.9.
+
+Look at the providers directory to see which cloud storage services are currently supported.
+
+Note that the "app" isn't verified for Google Drive and they require unverfied apps to explicitly register user accounts. If you want to use Google Drive with these scripts, register your own "app" in your https://console.developers.google.com page.

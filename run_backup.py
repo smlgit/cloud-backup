@@ -26,7 +26,9 @@ def main(args):
               'step for {}'.format(args.provider))
         return
 
+    print('==============================================================')
     print("Preparing to sync - press \'q\' then enter to stop the sync.")
+    print('')
 
     for res in sync.sync_drives(args.local_store_path, args.cpath,
                                 {'provider_name': args.provider,
@@ -37,6 +39,9 @@ def main(args):
 
         if check_for_user_quit() is True:
             break
+
+    print('==============================================================')
+    print('')
 
 
 if __name__ == '__main__':
