@@ -141,7 +141,6 @@ class BoxDrive(object):
         :return: (r, rx_dict) tuple
         """
 
-
         if method == 'get':
             func = requests.get
         elif method == 'post':
@@ -195,7 +194,7 @@ class BoxDrive(object):
         return r, rx_dict
 
 
-    def _do_paginated_get(self, url, entries_key, headers={}, params={}, data={}, json={},
+    def _do_paginated_get(self, url, entries_key, headers={}, params={}, data={}, json=None,
                           limit=200, server_error_retries=10):
         """
         Will do a _do_request (get) but apply the required pagination logic.
