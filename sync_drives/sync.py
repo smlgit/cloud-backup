@@ -80,6 +80,10 @@ def sync_drives(path_to_local_root, path_to_config_dir,
     :param config_pw: Password used to encrypt the config files.
     :return: Nothing.
     """
+
+    if provider_dict['provider_name'] == 'pcloud':
+        raise Exception('pcloud have removed the file_* API methods, so is disabled until I have added code to support using existing methods.')
+
     if os.path.exists(path_to_local_root) is False:
         raise FileNotFoundError('Local store root {} does not exist.'.format(path_to_local_root))
 
